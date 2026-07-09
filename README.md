@@ -22,6 +22,30 @@ Install from a local checkout:
 pi install /absolute/path/to/pi-extensions
 ```
 
+### Install a specific extension
+
+Pi installs git and npm packages at the package level. To load one extension from a package, use package filtering in `~/.pi/agent/settings.json` or project `.pi/settings.json`:
+
+```json
+{
+  "packages": [
+    {
+      "source": "git:github.com/rendotdev/pi-extensions",
+      "extensions": ["+extensions/pi-diff.ts"],
+      "skills": [],
+      "prompts": [],
+      "themes": []
+    }
+  ]
+}
+```
+
+For a local checkout, you can point Pi at a single extension file:
+
+```bash
+pi -e /absolute/path/to/pi-extensions/extensions/pi-diff.ts
+```
+
 ## Package structure
 
 Pi loads resources through the `pi` manifest in `package.json`:
@@ -29,16 +53,15 @@ Pi loads resources through the `pi` manifest in `package.json`:
 ```json
 {
   "pi": {
-    "extensions": ["./extensions"]
+    "extensions": ["./extensions/pi-diff.ts"]
   }
 }
 ```
 
-Files in `extensions/` export Pi extension factories. TypeScript files load directly in Pi, so this package does not need a build step.
+The manifest lists extension files directly so package filters can target exact extension paths. Files in `extensions/` export Pi extension factories. TypeScript files load directly in Pi, so this package does not need a build step.
 
 ## Included extensions
 
-- `extensions/rendotdev-info.ts`: registers `/rendotdev-info` and the `rendotdev_info` tool.
 - `extensions/pi-diff.ts`: registers the verb-style `pi-diff-open-review` and `pi-diff-finish-review` tools for browser-based inline pi-diff comments.
 
 ## Pi-diff workflow
