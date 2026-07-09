@@ -1279,7 +1279,7 @@ function buildReviewStylesSource(): string {
   --radius-2xl: var(--vercel-radius);
   --radius-3xl: var(--vercel-radius);
   --radius-4xl: var(--vercel-radius);
-  --background: #fafafa;
+  --background: #fff;
   --foreground: #000;
   --surface: #fff;
   --surface-foreground: #000;
@@ -1328,13 +1328,12 @@ body {
 }
 
 .document-review-surface ::selection {
-  background: #fef08a;
-  color: inherit;
+  background: #0070f3;
+  color: #fff;
 }
 
 .document-review-block[data-annotated="true"] {
-  background: #fffbeb;
-  box-shadow: -4px 0 0 #f59e0b;
+  background: rgb(0 112 243 / 10%);
 }
 `;
 }
@@ -1832,14 +1831,14 @@ function DocumentReviewSurface(props: {
     const annotations = props.comments.filter((comment) => comment.endBlockId === blockId);
     const annotated = props.comments.some((comment) => comment.startLine <= endLine && comment.endLine >= startLine);
     return <div
-      className="document-review-block -mx-3 rounded-md px-3 transition-colors"
+      className="document-review-block transition-colors"
       data-annotated={annotated ? "true" : "false"}
       data-document-block={blockId}
       data-start-line={startLine}
       data-end-line={endLine}
     >
       {content}
-      {annotations.map((comment) => <div key={comment.id} className="not-prose mb-4">
+      {annotations.map((comment) => <div key={comment.id} className="not-prose">
         <CommentEditor
           id={comment.id}
           value={comment.comment}
@@ -1910,14 +1909,12 @@ function DocumentReviewSurface(props: {
     }, 0);
   }
 
-  return <Card className="overflow-hidden border border-slate-300 bg-white" variant="outline">
-    <Card.Content className="p-0">
-      {props.document.location ? <div className="border-b border-slate-200 px-6 py-3 font-mono text-xs text-slate-500">{props.document.location}</div> : null}
-      <article ref={articleRef} onMouseUp={handleMouseUp} className="document-review-surface prose prose-slate max-w-none px-8 py-8 md:px-12 md:py-10">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{props.document.markdown}</ReactMarkdown>
-      </article>
-    </Card.Content>
-  </Card>;
+  return <div className="bg-white">
+    {props.document.location ? <div className="pb-6 font-mono text-xs text-slate-500">{props.document.location}</div> : null}
+    <article ref={articleRef} onMouseUp={handleMouseUp} className="document-review-surface prose prose-slate max-w-none">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{props.document.markdown}</ReactMarkdown>
+    </article>
+  </div>;
 }
 
 const textSelectionCleanupByNode = new WeakMap<HTMLElement, () => void>();
@@ -2187,7 +2184,7 @@ function CommentEditor(props: {
     props.onDelete();
   }
 
-  return <div data-review-comment="true" className="bg-amber-50 py-3 pl-3 pr-6 font-sans">
+  return <div data-review-comment="true" className="flex items-center bg-[#0070f3]/10 px-6 py-3 font-sans">
     <form.Field
       name="comment"
       listeners={{
@@ -2196,7 +2193,7 @@ function CommentEditor(props: {
         onBlur: ({ value }) => finishComment(value),
       }}
     >
-      {(field) => <div className="relative">
+      {(field) => <div className="relative w-full">
         <TextArea
           ref={textareaRef}
           aria-label="Review comment"
