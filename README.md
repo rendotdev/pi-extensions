@@ -4,11 +4,13 @@ Rendotdev Pi extensions packaged as a Pi package.
 
 ## Install
 
-Install from GitHub:
+Install pi-diff from GitHub:
 
 ```bash
 pi install git:github.com/rendotdev/pi-extensions
 ```
+
+This package currently exposes only `extensions/pi-diff.ts`, so the command above installs the pi-diff extension.
 
 ### Install a specific extension
 
