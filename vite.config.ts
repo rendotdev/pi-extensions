@@ -1,6 +1,13 @@
 import { defineConfig } from "vite-plus";
+import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
+  root: "web",
+  plugins: [tailwindcss()],
+  build: {
+    outDir: "../dist/web",
+    emptyOutDir: true,
+  },
   fmt: {
     ignorePatterns: ["dist/**", ".lgtm/**"],
     sortPackageJson: true,
@@ -19,6 +26,25 @@ export default defineConfig({
     entry: ["src/cli.ts"],
     format: ["esm"],
     outDir: "dist",
-    clean: true,
+    clean: false,
+  },
+  run: {
+    tasks: {
+      "build:web": {
+        command: "vp build",
+        cache: true,
+        output: ["dist/web/**"],
+      },
+      "build:cli": {
+        command: "vp pack",
+        cache: true,
+        output: ["dist/cli.mjs"],
+      },
+      package: {
+        command: 'node -e "" --',
+        dependsOn: ["build:web", "build:cli"],
+        cache: false,
+      },
+    },
   },
 });

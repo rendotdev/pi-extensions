@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -6,6 +6,7 @@ import {
   collectGitReviewFiles,
   finishReview,
   openReview,
+  serveReviewApp,
   stopReviews,
   type DiffReviewFileInput,
   type ReviewPointer,
@@ -15,6 +16,22 @@ const args = process.argv.slice(2);
 const command = args.shift() ?? "help";
 const jsonOutput = takeFlag("--json");
 const cwd = resolve(takeOption("--cwd") ?? process.cwd());
+const cancellation = new AbortController();
+let cancelling = false;
+
+async function cancel() {
+  if (cancelling) return;
+  cancelling = true;
+  cancellation.abort();
+  await stopReviews(cwd).catch(() => false);
+}
+
+process.once("SIGINT", () => {
+  void cancel().finally(() => process.exit(130));
+});
+process.once("SIGTERM", () => {
+  void cancel().finally(() => process.exit(143));
+});
 
 function takeFlag(flag: string) {
   const index = args.indexOf(flag);
@@ -35,6 +52,7 @@ function takeOption(option: string) {
 function reviewOptions() {
   return {
     cwd,
+    signal: cancellation.signal,
     onUpdate: jsonOutput ? undefined : (message: string) => console.error(message),
   };
 }
@@ -50,7 +68,11 @@ function printPointer(pointer: ReviewPointer) {
 }
 
 async function readStdin() {
-  return await Bun.stdin.text();
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 async function readInput(path: string | undefined) {
@@ -94,6 +116,13 @@ Document Markdown and custom JSON are read from stdin when no file is supplied.`
 }
 
 async function main() {
+  if (command === "serve") {
+    const appDir = takeOption("--app-dir");
+    if (!appDir) throw new Error("serve requires --app-dir.");
+    await serveReviewApp(appDir);
+    return;
+  }
+
   if (command === "help" || command === "--help" || command === "-h") {
     printHelp();
     return;

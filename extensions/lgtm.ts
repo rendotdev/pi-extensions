@@ -32,7 +32,11 @@ function reviewOptions(
     cleanupOnExit: true,
     onFinished: async (review, formattedReview) => {
       const decision =
-        review.status === "approved" ? "approved with LGTM" : "returned with review comments";
+        review.status === "approved"
+          ? "approved with LGTM"
+          : review.status === "canceled"
+            ? "canceled"
+            : "returned with review comments";
       pi.sendUserMessage(
         [
           `The browser LGTM review was ${decision}. Continue using the synced result below.`,
@@ -60,7 +64,7 @@ async function openFromPi(
           `Opened LGTM review: ${pointer.name}`,
           `URL: ${pointer.url}`,
           `Review JSON: ${pointer.reviewPath}`,
-          "The reviewer can send comments or approve with LGTM.",
+          "The reviewer can send comments, approve with LGTM, or cancel the review.",
         ].join("\n"),
       },
     ],
