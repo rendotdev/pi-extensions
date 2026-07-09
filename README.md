@@ -10,18 +10,6 @@ Install from GitHub:
 pi install git:github.com/rendotdev/pi-extensions
 ```
 
-Try the package for one Pi session:
-
-```bash
-pi -e git:github.com/rendotdev/pi-extensions
-```
-
-Install from a local checkout:
-
-```bash
-pi install /absolute/path/to/pi-extensions
-```
-
 ### Install a specific extension
 
 Pi installs git and npm packages at the package level. To load one extension from a package, use package filtering in `~/.pi/agent/settings.json` or project `.pi/settings.json`:
