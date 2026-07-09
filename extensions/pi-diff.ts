@@ -1248,7 +1248,7 @@ body {
 function buildReviewClientSource(): string {
   return String.raw`import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Button, Card, Chip, CloseButton, InputGroup, Spinner, TextArea, Typography } from "@heroui/react";
+import { Button, Card, Chip, CloseButton, Disclosure, DisclosureGroup, InputGroup, Spinner, TextArea, Typography } from "@heroui/react";
 import { Check, Copy as CopyIcon, X } from "lucide-react";
 import { useForm } from "@tanstack/react-form";
 import { MultiFileDiff, type DiffLineAnnotation, type SelectedLineRange } from "@pierre/diffs/react";
@@ -1591,20 +1591,22 @@ function App() {
       </div>
     </header>
 
-    <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 pb-[50vh]">
-      {payload.files.map((file) => {
-        const reviewFile = review.files.find((item) => item.location === file.location) || { location: file.location, added: file.added, removed: file.removed, comments: [] };
-        return <ReviewFileDiff
-          key={file.id}
-          file={file}
-          reviewFile={reviewFile}
-          activeCommentId={activeCommentId}
-          setActiveCommentId={setActiveCommentId}
-          addComment={addComment}
-          updateComment={updateComment}
-          deleteComment={deleteComment}
-        />;
-      })}
+    <div className="mx-auto max-w-7xl px-4 py-4 pb-[50vh]">
+      <DisclosureGroup allowsMultipleExpanded defaultExpandedKeys={payload.files.map((file) => file.id)} className="flex flex-col gap-4">
+        {payload.files.map((file) => {
+          const reviewFile = review.files.find((item) => item.location === file.location) || { location: file.location, added: file.added, removed: file.removed, comments: [] };
+          return <ReviewFileDiff
+            key={file.id}
+            file={file}
+            reviewFile={reviewFile}
+            activeCommentId={activeCommentId}
+            setActiveCommentId={setActiveCommentId}
+            addComment={addComment}
+            updateComment={updateComment}
+            deleteComment={deleteComment}
+          />;
+        })}
+      </DisclosureGroup>
     </div>
   </div>;
 }
@@ -1739,10 +1741,28 @@ function ReviewFileDiff(props: ReviewFileDiffProps) {
     }
   }
 
-  return <Card className="overflow-hidden border border-slate-300 bg-white" variant="outline">
-    <Card.Content className="p-0">
-      <MultiFileDiff<CommentAnnotationMetadata>
-        className="review-diff-surface block"
+  const writtenCommentCount = reviewFile.comments.filter((comment) => comment.comment.trim().length > 0).length;
+
+  return <Disclosure id={file.id} className="overflow-hidden rounded-[var(--vercel-radius)] border border-slate-300 bg-white">
+    <Disclosure.Heading>
+      <Disclosure.Trigger className="group flex w-full items-center justify-between gap-4 bg-white px-4 py-3 text-left transition-colors hover:bg-slate-50">
+        <span className="flex min-w-0 items-center gap-3">
+          <Disclosure.Indicator className="shrink-0 text-slate-500 transition-transform group-data-[expanded=true]:rotate-90" />
+          <span className="min-w-0">
+            <Typography type="body-sm" elementType="span" weight="semibold" truncate className="block text-slate-950">{file.location}</Typography>
+            <Typography type="body-xs" elementType="span" color="muted" className="mt-1 block leading-none">+{file.added} -{file.removed}</Typography>
+          </span>
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          {writtenCommentCount > 0 ? <Chip size="sm" variant="soft" color="primary"><Chip.Label>{writtenCommentCount} {writtenCommentCount === 1 ? "comment" : "comments"}</Chip.Label></Chip> : null}
+        </span>
+      </Disclosure.Trigger>
+    </Disclosure.Heading>
+    <Disclosure.Content className="border-t border-slate-200">
+      <Card className="border-0 bg-white shadow-none" variant="outline">
+        <Card.Content className="p-0">
+          <MultiFileDiff<CommentAnnotationMetadata>
+            className="review-diff-surface block"
         oldFile={oldFile}
         newFile={newFile}
         disableWorkerPool
@@ -1788,10 +1808,12 @@ function ReviewFileDiff(props: ReviewFileDiffProps) {
             updateComment={props.updateComment}
             deleteComment={props.deleteComment}
           />;
-        }}
-      />
-    </Card.Content>
-  </Card>;
+          }}
+        />
+        </Card.Content>
+      </Card>
+    </Disclosure.Content>
+  </Disclosure>;
 }
 
 function CommentAnnotation(props: {
