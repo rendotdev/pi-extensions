@@ -1736,7 +1736,8 @@ function App() {
   const commentCount = reviewCommentCount(review);
   const isFinished = review.status !== "open";
   const commentLabel = commentCount + " " + (commentCount === 1 ? "comment" : "comments");
-  const sendButtonLabel = isFinishing ? "Sending" : isSaving ? "Saving" : commentCount > 0 ? "Send " + commentLabel : "Send comments";
+  const decision = commentCount > 0 ? "changes_requested" : "approved";
+  const decisionButtonLabel = isFinishing ? (commentCount > 0 ? "Sending" : "Approving") : isSaving ? "Saving" : commentCount > 0 ? "Send " + commentLabel : "LGTM";
   const savedTime = lastSavedAt ? lastSavedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : null;
 
   return <div className="min-h-screen">
@@ -1762,13 +1763,10 @@ function App() {
         <div className="flex min-w-0 flex-wrap items-center gap-3 md:shrink-0 md:justify-end">
           <Typography type="body-xs" elementType="span" color="muted" aria-hidden={!isFinished && !savedTime} className={"leading-none " + (!isFinished && !savedTime ? "opacity-0" : "")}>{review.status === "approved" ? "Approved" : review.status === "changes_requested" ? "Comments sent" : savedTime ? "Saved " + savedTime : "Saved 00:00"}</Typography>
           {error ? <Chip size="sm" color="danger" variant="soft" className="max-w-full"><Chip.Label><Typography type="body-xs" elementType="span" truncate className="leading-none">{error}</Typography></Chip.Label></Chip> : null}
-          <Button size="sm" variant="secondary" isDisabled={isFinished || isFinishing || isSaving || commentCount === 0} onPress={() => finishReview("changes_requested")} title={commentCount === 0 ? "Add a comment before sending" : "Send review comments"}>
-            <span>{sendButtonLabel}</span>
-          </Button>
-          <Button size="sm" variant="primary" isPending={isFinishing || isSaving} isDisabled={isFinished} onPress={() => finishReview("approved")} title="Approve this review">
+          <Button size="sm" variant="primary" isPending={isFinishing || isSaving} isDisabled={isFinished || isFinishing || isSaving} onPress={() => finishReview(decision)} title={commentCount > 0 ? "Send review comments" : "Approve this review"}>
             {({ isPending }) => <span className="inline-flex items-center gap-2">
               {isPending ? <Spinner size="sm" color="current" className="-ms-0.5" /> : null}
-              <span>LGTM</span>
+              <span>{decisionButtonLabel}</span>
             </span>}
           </Button>
         </div>
