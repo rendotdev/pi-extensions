@@ -8,9 +8,9 @@ import {
   openReview,
   serveReviewApp,
   stopReviews,
-  type DiffReviewFileInput,
-  type ReviewPointer,
-} from "./core.ts";
+} from "../../platform/review/review-platform.ts";
+import type { DiffReviewFileInput, ReviewPointer } from "../../domain/review/review.ts";
+import { runMcpServer } from "../mcp/mcp.ts";
 
 const args = process.argv.slice(2);
 const command = args.shift() ?? "help";
@@ -108,6 +108,7 @@ Usage:
   lgtm document [markdown-file] [--name <name>] [--cwd <path>] [--json]
   lgtm finish [--cwd <path>] [--json]
   lgtm stop [--cwd <path>] [--json]
+  lgtm mcp
 
 Custom input:
   { "name": "Review name", "files": [{ "location": "file.ts", "oldContent": "", "newContent": "" }] }
@@ -116,6 +117,11 @@ Document Markdown and custom JSON are read from stdin when no file is supplied.`
 }
 
 async function main() {
+  if (command === "mcp") {
+    await runMcpServer();
+    return;
+  }
+
   if (command === "serve") {
     const appDir = takeOption("--app-dir");
     if (!appDir) throw new Error("serve requires --app-dir.");

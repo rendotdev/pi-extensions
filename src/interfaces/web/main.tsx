@@ -1,8 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 import {
+  AlertDialog,
   Button,
+  ButtonGroup,
   Card,
   Chip,
   CloseButton,
@@ -12,19 +14,34 @@ import {
   Spinner,
   TextArea,
   Toast,
+  Tooltip,
   toast,
   Typography,
 } from "@heroui/react";
-import { Check, Copy as CopyIcon, MessageSquarePlus, X } from "lucide-react";
-import { useForm } from "@tanstack/react-form";
 import {
-  MultiFileDiff,
-  type DiffLineAnnotation,
-  type MultiFileDiffProps,
+  Check,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Copy as CopyIcon,
+  MessageSquarePlus,
+  Trash2,
+  X,
+} from "lucide-react";
+import { useForm } from "@tanstack/react-form";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
+import { parseDiffFromFile, type DiffLineAnnotation, type FileDiffMetadata } from "@pierre/diffs";
+import { AnimatePresence, motion } from "motion/react";
+import {
+  FileDiff,
+  type FileDiffProps,
   type SelectedLineRange,
+  WorkerPoolContextProvider,
 } from "@pierre/diffs/react";
+import DiffsWorker from "@pierre/diffs/worker/worker.js?worker";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { CommentDraft } from "./comment-draft.ts";
+import { ReviewHandoff } from "./review-handoff.ts";
 
 type ReviewSourceFile = {
   id: string;
@@ -35,6 +52,16 @@ type ReviewSourceFile = {
   added: number;
   removed: number;
 };
+
+const parsedFileDiffCache = new WeakMap<ReviewSourceFile, FileDiffMetadata>();
+const defaultCollapsedChangedLineThreshold = 500;
+const largeDiffWordHighlightThreshold = 2_000;
+const snappyTransition = {
+  duration: 0.14,
+  ease: [0.2, 0, 0, 1] as const,
+};
+const reviewIconSize = 14;
+const reviewIconStrokeWidth = 1.5;
 
 type ReviewComment = {
   id: string;
@@ -166,34 +193,43 @@ function reviewCommentCount(review: ReviewJson) {
   );
 }
 
-function reviewFilesWithWrittenComments(review: ReviewJson) {
-  return review.files.map((file) => ({
-    ...file,
-    comments: file.comments.filter((comment) => comment.comment.trim().length > 0),
-  }));
+function reviewHasCommentEntries(review: ReviewJson) {
+  return review.kind === "document"
+    ? review.documentComments.length > 0
+    : review.files.some((file) => file.comments.length > 0);
+}
+
+function clearReviewComments(review: ReviewJson): ReviewJson {
+  if (!reviewHasCommentEntries(review)) return review;
+  return {
+    ...review,
+    updatedAt: new Date().toISOString(),
+    files: review.files.map((file) =>
+      file.comments.length > 0 ? { ...file, comments: [] } : file,
+    ),
+    documentComments: [],
+  };
 }
 
 function meaningfulReviewSignature(review: ReviewJson) {
   if (review.kind === "document") {
     return JSON.stringify(
-      review.documentComments
-        .filter((comment) => comment.comment.trim().length > 0)
-        .map((comment) => ({
-          id: comment.id,
-          selectedText: comment.selectedText,
-          startBlockId: comment.startBlockId,
-          endBlockId: comment.endBlockId,
-          startLine: comment.startLine,
-          endLine: comment.endLine,
-          prefix: comment.prefix,
-          suffix: comment.suffix,
-          comment: comment.comment,
-          createdAt: comment.createdAt,
-        })),
+      review.documentComments.map((comment) => ({
+        id: comment.id,
+        selectedText: comment.selectedText,
+        startBlockId: comment.startBlockId,
+        endBlockId: comment.endBlockId,
+        startLine: comment.startLine,
+        endLine: comment.endLine,
+        prefix: comment.prefix,
+        suffix: comment.suffix,
+        comment: comment.comment,
+        createdAt: comment.createdAt,
+      })),
     );
   }
   return JSON.stringify(
-    reviewFilesWithWrittenComments(review).map((file) => ({
+    review.files.map((file) => ({
       location: file.location,
       comments: file.comments.map((comment) => ({
         id: comment.id,
@@ -210,21 +246,6 @@ function meaningfulReviewSignature(review: ReviewJson) {
       })),
     })),
   );
-}
-
-function reviewForSave(review: ReviewJson): ReviewJson {
-  if (review.kind === "document") {
-    return {
-      ...review,
-      documentComments: review.documentComments.filter(
-        (comment) => comment.comment.trim().length > 0,
-      ),
-    };
-  }
-  return {
-    ...review,
-    files: reviewFilesWithWrittenComments(review),
-  };
 }
 
 function updateReviewFile(
@@ -248,13 +269,34 @@ function updateReviewFile(
   };
 }
 
+function getDefaultCollapsedFileIds(state: AppState) {
+  if (state.payload.kind !== "diff") return new Set<string>();
+
+  return new Set(
+    state.payload.files
+      .filter((file) => {
+        const reviewFile = state.review.files.find((item) => item.location === file.location);
+        return (
+          file.added + file.removed >= defaultCollapsedChangedLineThreshold &&
+          !reviewFile?.comments.length
+        );
+      })
+      .map((file) => file.id),
+  );
+}
+
 function App() {
   const [state, setState] = useState<AppState | null>(null);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [copiedReviewPath, setCopiedReviewPath] = useState(false);
   const [isFinishing, setIsFinishing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [recoveryStatus, setRecoveryStatus] = useState<string | null>(null);
+  const [collapsedFileIds, setCollapsedFileIds] = useState<Set<string>>(() => new Set());
+  const reviewHeaderRef = useRef<HTMLElement | null>(null);
+  const deleteAllTriggerRef = useRef<HTMLButtonElement | null>(null);
   const saveTimer = useRef<number | null>(null);
   const saveRun = useRef(0);
   const lastSavedSignature = useRef<string | null>(null);
@@ -265,6 +307,7 @@ function App() {
       .then((nextState) => {
         if (cancelled) return;
         lastSavedSignature.current = meaningfulReviewSignature(nextState.review);
+        setCollapsedFileIds(getDefaultCollapsedFileIds(nextState));
         setState(nextState);
       })
       .catch((loadError) => {
@@ -281,7 +324,26 @@ function App() {
     };
   }, []);
 
-  function queueSave(review: ReviewJson) {
+  const isLoaded = state !== null;
+  useLayoutEffect(() => {
+    const header = reviewHeaderRef.current;
+    if (!header) return;
+    const updateHeaderHeight = () => {
+      document.documentElement.style.setProperty(
+        "--review-header-height",
+        `${header.getBoundingClientRect().height}px`,
+      );
+    };
+    const observer = new ResizeObserver(updateHeaderHeight);
+    observer.observe(header);
+    updateHeaderHeight();
+    return () => {
+      observer.disconnect();
+      document.documentElement.style.removeProperty("--review-header-height");
+    };
+  }, [isLoaded]);
+
+  const queueSave = useCallback((review: ReviewJson) => {
     const signature = meaningfulReviewSignature(review);
     if (signature === lastSavedSignature.current) return;
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
@@ -290,7 +352,7 @@ function App() {
     saveRun.current = run;
     saveTimer.current = window.setTimeout(async () => {
       try {
-        await saveReview(reviewForSave(review));
+        await saveReview(review);
         if (run !== saveRun.current) return;
         lastSavedSignature.current = signature;
         setLastSavedAt(new Date());
@@ -306,87 +368,104 @@ function App() {
         if (run === saveRun.current) setIsSaving(false);
       }
     }, 250);
-  }
+  }, []);
 
-  function commitReview(updater: (review: ReviewJson) => ReviewJson) {
-    setState((current) => {
-      if (!current) return current;
-      const nextReview = updater(current.review);
-      if (nextReview === current.review) return current;
-      queueSave(nextReview);
-      return { ...current, review: nextReview };
+  const commitReview = useCallback(
+    (updater: (review: ReviewJson) => ReviewJson) => {
+      setState((current) => {
+        if (!current) return current;
+        const nextReview = updater(current.review);
+        if (nextReview === current.review) return current;
+        queueSave(nextReview);
+        return { ...current, review: nextReview };
+      });
+    },
+    [queueSave],
+  );
+
+  const setFileExpanded = useCallback((fileId: string, isExpanded: boolean) => {
+    setCollapsedFileIds((current) => {
+      const next = new Set(current);
+      if (isExpanded) next.delete(fileId);
+      else next.add(fileId);
+      return next;
     });
-  }
+  }, []);
 
-  function addComment(
-    file: ReviewSourceFile,
-    selectedRange: SelectedLineRange,
-    selectedTextOverride?: string,
-  ) {
-    const side = selectedRange.endSide || selectedRange.side || "additions";
-    const startLine = Math.min(selectedRange.start, selectedRange.end);
-    const endLine = Math.max(selectedRange.start, selectedRange.end);
-    const lineNumbers = Array.from(
-      { length: endLine - startLine + 1 },
-      (_, index) => startLine + index,
-    );
-    const selectedText = selectedTextOverride?.trim()
-      ? selectedTextOverride
-      : getSelectedText(file, side, startLine, endLine);
-    const now = new Date().toISOString();
-    const comment: ReviewComment = {
-      id: makeId(),
-      fileLocation: file.location,
-      selectedRowIds: [side + ":" + startLine + "-" + endLine],
-      selectedText,
-      side,
-      selectedRange,
-      startLine,
-      endLine,
-      lineNumbers,
-      comment: "",
-      createdAt: now,
-      updatedAt: now,
-    };
+  const addComment = useCallback(
+    (file: ReviewSourceFile, selectedRange: SelectedLineRange, selectedTextOverride?: string) => {
+      const side = selectedRange.endSide || selectedRange.side || "additions";
+      const startLine = Math.min(selectedRange.start, selectedRange.end);
+      const endLine = Math.max(selectedRange.start, selectedRange.end);
+      const lineNumbers = Array.from(
+        { length: endLine - startLine + 1 },
+        (_, index) => startLine + index,
+      );
+      const selectedText = selectedTextOverride?.trim()
+        ? selectedTextOverride
+        : getSelectedText(file, side, startLine, endLine);
+      const now = new Date().toISOString();
+      const comment: ReviewComment = {
+        id: makeId(),
+        fileLocation: file.location,
+        selectedRowIds: [side + ":" + startLine + "-" + endLine],
+        selectedText,
+        side,
+        selectedRange,
+        startLine,
+        endLine,
+        lineNumbers,
+        comment: "",
+        createdAt: now,
+        updatedAt: now,
+      };
 
-    commitReview((review) =>
-      updateReviewFile(review, file.location, (reviewFile) => ({
-        ...reviewFile,
-        comments: [...reviewFile.comments, comment],
-      })),
-    );
-    setActiveCommentId(comment.id);
-  }
+      commitReview((review) =>
+        updateReviewFile(review, file.location, (reviewFile) => ({
+          ...reviewFile,
+          comments: [...reviewFile.comments, comment],
+        })),
+      );
+      setActiveCommentId(comment.id);
+    },
+    [commitReview],
+  );
 
-  function updateComment(fileLocation: string, commentId: string, patch: Partial<ReviewComment>) {
-    commitReview((review) =>
-      updateReviewFile(review, fileLocation, (reviewFile) => {
-        let changed = false;
-        const comments = reviewFile.comments.map((comment) => {
-          if (comment.id !== commentId) return comment;
-          const nextComment = { ...comment, ...patch, updatedAt: new Date().toISOString() };
-          const hasChanged =
-            JSON.stringify({ ...comment, updatedAt: undefined }) !==
-            JSON.stringify({ ...nextComment, updatedAt: undefined });
-          if (!hasChanged) return comment;
-          changed = true;
-          return nextComment;
-        });
-        return changed ? { ...reviewFile, comments } : reviewFile;
-      }),
-    );
-  }
+  const updateComment = useCallback(
+    (fileLocation: string, commentId: string, patch: Partial<ReviewComment>) => {
+      commitReview((review) =>
+        updateReviewFile(review, fileLocation, (reviewFile) => {
+          let changed = false;
+          const comments = reviewFile.comments.map((comment) => {
+            if (comment.id !== commentId) return comment;
+            const nextComment = { ...comment, ...patch, updatedAt: new Date().toISOString() };
+            const hasChanged =
+              JSON.stringify({ ...comment, updatedAt: undefined }) !==
+              JSON.stringify({ ...nextComment, updatedAt: undefined });
+            if (!hasChanged) return comment;
+            changed = true;
+            return nextComment;
+          });
+          return changed ? { ...reviewFile, comments } : reviewFile;
+        }),
+      );
+    },
+    [commitReview],
+  );
 
-  function deleteComment(fileLocation: string, commentId: string) {
-    commitReview((review) =>
-      updateReviewFile(review, fileLocation, (reviewFile) => {
-        const comments = reviewFile.comments.filter((comment) => comment.id !== commentId);
-        return comments.length === reviewFile.comments.length
-          ? reviewFile
-          : { ...reviewFile, comments };
-      }),
-    );
-  }
+  const deleteComment = useCallback(
+    (fileLocation: string, commentId: string) => {
+      commitReview((review) =>
+        updateReviewFile(review, fileLocation, (reviewFile) => {
+          const comments = reviewFile.comments.filter((comment) => comment.id !== commentId);
+          return comments.length === reviewFile.comments.length
+            ? reviewFile
+            : { ...reviewFile, comments };
+        }),
+      );
+    },
+    [commitReview],
+  );
 
   function addDocumentComment(comment: DocumentComment) {
     commitReview((review) => ({
@@ -427,6 +506,13 @@ function App() {
     });
   }
 
+  function clearComments() {
+    if (!state || isFinished || isFinishing || isSaving) return;
+    setIsDeleteDialogOpen(false);
+    setActiveCommentId(null);
+    commitReview(clearReviewComments);
+  }
+
   async function copyReviewPath() {
     if (!state) return;
     try {
@@ -442,7 +528,32 @@ function App() {
     if (!state || isFinishing || isSaving) return;
     if (decision === "changes_requested" && reviewCommentCount(state.review) === 0) return;
     setIsFinishing(true);
+    setRecoveryStatus(null);
     try {
+      await navigator.clipboard.writeText(
+        decision === "approved" ? "LGTM" : `PTAL: ${state.payload.reviewPath}`,
+      );
+      setCopiedReviewPath(true);
+    } catch (clipboardError) {
+      setIsFinishing(false);
+      setCopiedReviewPath(false);
+      toast.danger("Unable to copy the review handoff", {
+        description: errorDescription(
+          clipboardError,
+          decision === "approved"
+            ? "Copy LGTM and send it to the agent."
+            : "Copy the review JSON path and prefix it with PTAL: before sending it to the agent.",
+        ),
+      });
+      return;
+    }
+    try {
+      if (saveTimer.current) {
+        window.clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      const reviewToFinish = await saveReview(state.review);
+      lastSavedSignature.current = meaningfulReviewSignature(reviewToFinish);
       const response = await fetch("/api/finish", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -459,19 +570,20 @@ function App() {
           heading +
           "</h1><p>You can close this tab.</p></main>";
       }, 250);
-    } catch (finishError) {
+    } catch {
       setIsFinishing(false);
-      toast.danger("Unable to finish the review", {
-        description: errorDescription(
-          finishError,
-          "Check that the review server is still running.",
-        ),
-      });
+      setCopiedReviewPath(false);
+      try {
+        await navigator.clipboard.writeText(ReviewHandoff.recoveryText(state.review));
+        setRecoveryStatus("Comments copied");
+      } catch {
+        setRecoveryStatus("Comments kept in this tab");
+      }
     }
   }
 
   async function cancelReview() {
-    if (!state || isFinishing) return;
+    if (!state || isFinishing || isSaving) return;
     setIsFinishing(true);
     try {
       const response = await fetch("/api/cancel", { method: "POST" });
@@ -507,26 +619,56 @@ function App() {
 
   const { payload, review } = state;
   const commentCount = reviewCommentCount(review);
+  const hasCommentEntries = reviewHasCommentEntries(review);
   const isFinished = review.status !== "open";
   const commentLabel = commentCount + " " + (commentCount === 1 ? "comment" : "comments");
   const decision = commentCount > 0 ? "changes_requested" : "approved";
-  const decisionButtonLabel = isFinishing
-    ? commentCount > 0
-      ? "Sending"
-      : "Approving"
-    : isSaving
-      ? "Saving"
-      : commentCount > 0
-        ? "Send " + commentLabel
-        : "LGTM";
+  const decisionButtonLabel = commentCount > 0 ? "Send " + commentLabel : "LGTM";
   const savedTime = lastSavedAt
     ? lastSavedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
     : null;
+  const reviewStatusLabel =
+    recoveryStatus ??
+    (review.status === "approved"
+      ? "Approved"
+      : review.status === "changes_requested"
+        ? "Comments sent"
+        : review.status === "canceled"
+          ? "Canceled"
+          : savedTime
+            ? "Saved " + savedTime
+            : null);
   const contentMaxWidth = payload.kind === "document" ? "max-w-4xl" : "max-w-7xl";
+  const canToggleFiles = payload.kind === "diff" && payload.files.length > 0;
+  const isDeleteAllDisabled = isFinished || isFinishing || isSaving || !hasCommentEntries;
+  const areAllFilesExpanded =
+    canToggleFiles && payload.files.every((file) => !collapsedFileIds.has(file.id));
+  const reviewPathParts = payload.reviewPath.split(/[\\/]/).filter(Boolean);
+  const reviewFileName = reviewPathParts.at(-1) ?? "review.json";
+  const reviewSessionName = reviewPathParts.at(-2) ?? "session";
+  const displayedReviewPath =
+    reviewSessionName.length > 24
+      ? `${reviewSessionName.slice(0, 14)}…${reviewSessionName.slice(-7)}/${reviewFileName}`
+      : `${reviewSessionName}/${reviewFileName}`;
+
+  function toggleAllFiles() {
+    if (!canToggleFiles) return;
+    setCollapsedFileIds(
+      areAllFilesExpanded ? new Set(payload.files.map((file) => file.id)) : new Set(),
+    );
+  }
+
+  function handleDeleteDialogOpenChange(isOpen: boolean) {
+    setIsDeleteDialogOpen(isOpen && !isDeleteAllDisabled);
+    if (!isOpen) window.requestAnimationFrame(() => deleteAllTriggerRef.current?.focus());
+  }
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 backdrop-blur">
+      <header
+        ref={reviewHeaderRef}
+        className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 backdrop-blur"
+      >
         <div className={"mx-auto px-4 py-5 " + contentMaxWidth}>
           <div className="flex min-w-0 items-center justify-between gap-4">
             <Typography.Heading
@@ -536,33 +678,60 @@ function App() {
             >
               {payload.name}
             </Typography.Heading>
-            <Typography
-              type="body-xs"
-              color="muted"
-              aria-hidden={!isFinished && !savedTime}
-              className={"shrink-0 leading-none " + (!isFinished && !savedTime ? "opacity-0" : "")}
-            >
-              {review.status === "approved"
-                ? "Approved"
-                : review.status === "changes_requested"
-                  ? "Comments sent"
-                  : review.status === "canceled"
-                    ? "Canceled"
-                    : savedTime
-                      ? "Saved " + savedTime
-                      : "Saved 00:00"}
-            </Typography>
+            <div className="flex w-32 shrink-0 items-center justify-end gap-2" aria-live="polite">
+              <span className="relative h-4 w-4 shrink-0">
+                <AnimatePresence initial={false}>
+                  {isFinishing || isSaving ? (
+                    <motion.span
+                      key="loading"
+                      className="absolute inset-0 flex items-center justify-center text-slate-400"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={snappyTransition}
+                    >
+                      <Spinner
+                        size="sm"
+                        color="current"
+                        aria-label={isFinishing ? "Finishing review" : "Saving review"}
+                      />
+                    </motion.span>
+                  ) : reviewStatusLabel ? (
+                    <motion.span
+                      key="saved"
+                      className="absolute inset-0 flex items-center justify-center text-slate-400"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={snappyTransition}
+                    >
+                      <Check
+                        size={reviewIconSize}
+                        strokeWidth={reviewIconStrokeWidth}
+                        absoluteStrokeWidth
+                        aria-hidden="true"
+                      />
+                    </motion.span>
+                  ) : null}
+                </AnimatePresence>
+              </span>
+              {reviewStatusLabel ? (
+                <Typography type="body-xs" color="muted" className="shrink-0 leading-none">
+                  {reviewStatusLabel}
+                </Typography>
+              ) : null}
+            </div>
           </div>
           <div className="mt-3 flex min-w-0 flex-col gap-3 md:flex-row md:items-center">
             <InputGroup
               fullWidth
               variant="secondary"
               aria-label="Review JSON path"
-              className="min-w-0 flex-1 bg-slate-50 shadow-none md:max-w-xl"
+              className="group/review-path min-w-0 flex-1 bg-slate-50 shadow-none md:max-w-md"
             >
               <InputGroup.Input
                 readOnly
-                value={payload.reviewPath}
+                value={displayedReviewPath}
                 className="font-mono text-xs text-slate-600"
                 onFocus={(event) => event.currentTarget.select()}
               />
@@ -570,14 +739,24 @@ function App() {
                 <Button
                   size="sm"
                   variant="outline"
-                  className="h-7 min-w-0 px-2 font-normal"
+                  className="h-7 min-w-0 px-2 font-normal opacity-0 transition-opacity duration-[var(--motion-duration)] ease-[var(--motion-ease)] group-focus-within/review-path:opacity-100 group-hover/review-path:opacity-100"
                   onClick={copyReviewPath}
                   aria-label="Copy review JSON path"
                 >
                   {copiedReviewPath ? (
-                    <Check size={14} strokeWidth={1.5} absoluteStrokeWidth aria-hidden="true" />
+                    <Check
+                      size={reviewIconSize}
+                      strokeWidth={reviewIconStrokeWidth}
+                      absoluteStrokeWidth
+                      aria-hidden="true"
+                    />
                   ) : (
-                    <CopyIcon size={14} strokeWidth={1.5} absoluteStrokeWidth aria-hidden="true" />
+                    <CopyIcon
+                      size={reviewIconSize}
+                      strokeWidth={reviewIconStrokeWidth}
+                      absoluteStrokeWidth
+                      aria-hidden="true"
+                    />
                   )}
                   <Typography type="body-xs" weight="normal" className="leading-none">
                     {copiedReviewPath ? "Copied" : "Copy"}
@@ -585,37 +764,124 @@ function App() {
                 </Button>
               </InputGroup.Suffix>
             </InputGroup>
-            <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-3 md:ml-auto md:justify-end">
-              <Button
-                size="sm"
-                variant="outline"
-                isDisabled={isFinished || isFinishing}
-                onPress={cancelReview}
-                aria-label="Cancel this review"
+            <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2 md:ml-auto md:justify-end">
+              <div
+                role="group"
+                aria-label="Review content actions"
+                className="inline-flex items-center"
               >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                variant="primary"
-                isPending={isFinishing || isSaving}
-                isDisabled={isFinished || isFinishing || isSaving}
-                onPress={() => finishReview(decision)}
-                aria-label={commentCount > 0 ? "Send review comments" : "Approve this review"}
-              >
-                {({ isPending }) => (
-                  <span className="inline-flex items-center gap-2">
-                    {isPending ? <Spinner size="sm" color="current" className="-ms-0.5" /> : null}
-                    <span>{decisionButtonLabel}</span>
-                  </span>
-                )}
-              </Button>
+                <Tooltip delay={140} closeDelay={140} isDisabled={isDeleteAllDisabled}>
+                  <Tooltip.Trigger className="contents">
+                    <Button
+                      ref={deleteAllTriggerRef}
+                      size="sm"
+                      variant="outline"
+                      isIconOnly
+                      isDisabled={isDeleteAllDisabled}
+                      aria-label="Delete all review comments"
+                      className="!rounded-e-none"
+                      onPress={() => setIsDeleteDialogOpen(true)}
+                    >
+                      <Trash2
+                        className="text-[var(--muted)]"
+                        size={reviewIconSize}
+                        strokeWidth={reviewIconStrokeWidth}
+                        absoluteStrokeWidth
+                        aria-hidden="true"
+                      />
+                    </Button>
+                  </Tooltip.Trigger>
+                  <Tooltip.Content placement="bottom" showArrow>
+                    <Tooltip.Arrow />
+                    Delete all comments
+                  </Tooltip.Content>
+                </Tooltip>
+                <Tooltip delay={140} closeDelay={140} isDisabled={!canToggleFiles}>
+                  <Tooltip.Trigger className="contents">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      isIconOnly
+                      isDisabled={isFinished || isFinishing || !canToggleFiles}
+                      onPress={toggleAllFiles}
+                      aria-label={areAllFilesExpanded ? "Collapse all files" : "Expand all files"}
+                      className="-ms-px !rounded-s-none"
+                    >
+                      {areAllFilesExpanded ? (
+                        <ChevronsDownUp
+                          className="text-[var(--muted)]"
+                          size={reviewIconSize}
+                          strokeWidth={reviewIconStrokeWidth}
+                          absoluteStrokeWidth
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <ChevronsUpDown
+                          className="text-[var(--muted)]"
+                          size={reviewIconSize}
+                          strokeWidth={reviewIconStrokeWidth}
+                          absoluteStrokeWidth
+                          aria-hidden="true"
+                        />
+                      )}
+                    </Button>
+                  </Tooltip.Trigger>
+                  <Tooltip.Content placement="bottom" showArrow>
+                    <Tooltip.Arrow />
+                    {areAllFilesExpanded ? "Collapse all files" : "Expand all files"}
+                  </Tooltip.Content>
+                </Tooltip>
+              </div>
+              <ButtonGroup size="sm">
+                <Button
+                  variant="outline"
+                  isDisabled={isFinished || isFinishing || isSaving}
+                  onPress={cancelReview}
+                  aria-label="Cancel this review"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  isDisabled={isFinished || isFinishing || isSaving}
+                  onPress={() => finishReview(decision)}
+                  aria-label={commentCount > 0 ? "Send review comments" : "Approve this review"}
+                >
+                  <ButtonGroup.Separator />
+                  {decisionButtonLabel}
+                </Button>
+              </ButtonGroup>
             </div>
           </div>
         </div>
       </header>
 
-      <div className={"mx-auto flex flex-col gap-4 px-4 py-4 pb-[50vh] " + contentMaxWidth}>
+      <AlertDialog isOpen={isDeleteDialogOpen} onOpenChange={handleDeleteDialogOpenChange}>
+        <Button className="hidden" aria-hidden="true" isDisabled />
+        <AlertDialog.Backdrop variant="blur">
+          <AlertDialog.Container size="sm">
+            <AlertDialog.Dialog>
+              <AlertDialog.Header>
+                <AlertDialog.Icon status="danger" />
+                <AlertDialog.Heading>Delete all comments?</AlertDialog.Heading>
+              </AlertDialog.Header>
+              <AlertDialog.Body>
+                This removes every review comment. The review stays open.
+              </AlertDialog.Body>
+              <AlertDialog.Footer>
+                <Button slot="close" variant="tertiary">
+                  Keep comments
+                </Button>
+                <Button slot="close" variant="danger" onPress={clearComments}>
+                  Delete all
+                </Button>
+              </AlertDialog.Footer>
+            </AlertDialog.Dialog>
+          </AlertDialog.Container>
+        </AlertDialog.Backdrop>
+      </AlertDialog>
+
+      <div className={"mx-auto flex flex-col gap-4 px-4 pt-[5vh] pb-[50vh] " + contentMaxWidth}>
         {payload.kind === "document" && payload.document ? (
           <DocumentReviewSurface
             document={payload.document}
@@ -627,32 +893,17 @@ function App() {
             deleteComment={deleteDocumentComment}
           />
         ) : (
-          <DisclosureGroup
-            allowsMultipleExpanded
-            defaultExpandedKeys={payload.files.map((file) => file.id)}
-            className="flex flex-col gap-4"
-          >
-            {payload.files.map((file) => {
-              const reviewFile = review.files.find((item) => item.location === file.location) || {
-                location: file.location,
-                added: file.added,
-                removed: file.removed,
-                comments: [],
-              };
-              return (
-                <ReviewFileDiff
-                  key={file.id}
-                  file={file}
-                  reviewFile={reviewFile}
-                  activeCommentId={activeCommentId}
-                  setActiveCommentId={setActiveCommentId}
-                  addComment={addComment}
-                  updateComment={updateComment}
-                  deleteComment={deleteComment}
-                />
-              );
-            })}
-          </DisclosureGroup>
+          <DiffReviewList
+            payload={payload}
+            review={review}
+            collapsedFileIds={collapsedFileIds}
+            activeCommentId={activeCommentId}
+            setActiveCommentId={setActiveCommentId}
+            setFileExpanded={setFileExpanded}
+            addComment={addComment}
+            updateComment={updateComment}
+            deleteComment={deleteComment}
+          />
         )}
       </div>
     </div>
@@ -672,6 +923,171 @@ type ReviewFileDiffProps = {
   updateComment: (fileLocation: string, commentId: string, patch: Partial<ReviewComment>) => void;
   deleteComment: (fileLocation: string, commentId: string) => void;
 };
+
+const ReviewFileRow = React.memo(function ReviewFileRow(
+  props: ReviewFileDiffProps & {
+    isExpanded: boolean;
+    onExpandedChange: (fileId: string, isExpanded: boolean) => void;
+  },
+) {
+  const expandedKeys = useMemo(
+    () => (props.isExpanded ? [props.file.id] : []),
+    [props.file.id, props.isExpanded],
+  );
+  return (
+    <DisclosureGroup
+      allowsMultipleExpanded
+      expandedKeys={expandedKeys}
+      onExpandedChange={(keys) => props.onExpandedChange(props.file.id, keys.has(props.file.id))}
+    >
+      <ReviewFileDiff
+        file={props.file}
+        reviewFile={props.reviewFile}
+        activeCommentId={props.activeCommentId}
+        setActiveCommentId={props.setActiveCommentId}
+        addComment={props.addComment}
+        updateComment={props.updateComment}
+        deleteComment={props.deleteComment}
+      />
+    </DisclosureGroup>
+  );
+});
+
+function DiffReviewList(props: {
+  payload: ReviewPayload;
+  review: ReviewJson;
+  collapsedFileIds: Set<string>;
+  activeCommentId: string | null;
+  setActiveCommentId: (id: string | null) => void;
+  setFileExpanded: (fileId: string, isExpanded: boolean) => void;
+  addComment: ReviewFileDiffProps["addComment"];
+  updateComment: ReviewFileDiffProps["updateComment"];
+  deleteComment: ReviewFileDiffProps["deleteComment"];
+}) {
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
+  const getItemKey = useCallback(
+    (index: number) => props.payload.files[index]?.id ?? index,
+    [props.payload.files],
+  );
+  const estimateSize = useCallback(
+    (index: number) => {
+      const file = props.payload.files[index];
+      if (!file) return 120;
+      if (props.collapsedFileIds.has(file.id)) return 82;
+      return Math.max(120, 112 + (file.added + file.removed) * 22);
+    },
+    [props.collapsedFileIds, props.payload.files],
+  );
+  const fileVirtualizer = useWindowVirtualizer({
+    count: props.payload.files.length,
+    estimateSize,
+    getItemKey,
+    overscan: 1,
+    scrollMargin,
+    useFlushSync: false,
+  });
+  fileVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => false;
+
+  const handleFileExpandedChange = useCallback(
+    (fileId: string, isExpanded: boolean) => {
+      const commitExpandedChange = () => {
+        props.setFileExpanded(fileId, isExpanded);
+        window.requestAnimationFrame(() => {
+          const item = listRef.current?.querySelector<HTMLElement>(
+            `[data-review-file-item="${CSS.escape(fileId)}"]`,
+          );
+          if (item) fileVirtualizer.measureElement(item);
+        });
+      };
+
+      if (!isExpanded) {
+        const item = listRef.current?.querySelector<HTMLElement>(
+          `[data-review-file-item="${CSS.escape(fileId)}"]`,
+        );
+        const heading = item?.querySelector<HTMLElement>("[data-review-file-heading]");
+        const stickyTop = Number.parseFloat(
+          getComputedStyle(document.documentElement).getPropertyValue("--review-header-height"),
+        );
+        if (
+          item &&
+          heading &&
+          Number.isFinite(stickyTop) &&
+          Math.abs(heading.getBoundingClientRect().top - stickyTop) <= 1
+        ) {
+          const headingInset = Number.parseFloat(
+            getComputedStyle(heading.parentElement ?? heading).borderTopWidth,
+          );
+          window.scrollTo(
+            0,
+            item.getBoundingClientRect().top + window.scrollY + headingInset - stickyTop,
+          );
+          window.requestAnimationFrame(commitExpandedChange);
+          return;
+        }
+      }
+
+      commitExpandedChange();
+    },
+    [fileVirtualizer, props.setFileExpanded],
+  );
+
+  useLayoutEffect(() => {
+    setScrollMargin(listRef.current?.offsetTop ?? 0);
+  }, []);
+
+  return (
+    <div
+      ref={listRef}
+      data-review-file-list=""
+      style={{
+        height: fileVirtualizer.getTotalSize(),
+        overflowAnchor: "none",
+        position: "relative",
+      }}
+    >
+      {fileVirtualizer.getVirtualItems().map((virtualFile) => {
+        const file = props.payload.files[virtualFile.index];
+        if (!file) return null;
+        const reviewFile = props.review.files.find((item) => item.location === file.location) || {
+          location: file.location,
+          added: file.added,
+          removed: file.removed,
+          comments: [],
+        };
+        const fileActiveCommentId = reviewFile.comments.some(
+          (comment) => comment.id === props.activeCommentId,
+        )
+          ? props.activeCommentId
+          : null;
+        return (
+          <div
+            key={virtualFile.key}
+            ref={fileVirtualizer.measureElement}
+            data-index={virtualFile.index}
+            data-review-file-item={file.id}
+            className="absolute left-0 top-0 w-full pb-4"
+            style={{
+              top: virtualFile.start - fileVirtualizer.options.scrollMargin,
+            }}
+          >
+            <ReviewFileRow
+              file={file}
+              reviewFile={reviewFile}
+              activeCommentId={fileActiveCommentId}
+              isExpanded={!props.collapsedFileIds.has(file.id)}
+              onExpandedChange={handleFileExpandedChange}
+              setActiveCommentId={props.setActiveCommentId}
+              addComment={props.addComment}
+              updateComment={props.updateComment}
+              deleteComment={props.deleteComment}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function DocumentReviewSurface(props: {
   document: DocumentSource;
@@ -704,12 +1120,18 @@ function DocumentReviewSurface(props: {
       <>
         <button
           type="button"
-          className="document-review-comment-button not-prose"
+          data-document-comment-button=""
+          className="not-prose absolute left-[-2.25rem] top-1 z-[1] flex h-7 w-7 items-center justify-center rounded-[var(--vercel-radius)] border border-[var(--border)] bg-white text-[var(--muted)] opacity-0 transition-[border-color,color,opacity] after:absolute after:inset-y-0 after:left-full after:w-2 after:content-[''] duration-[var(--motion-duration)] ease-[var(--motion-ease)] hover:border-neutral-400 hover:text-[var(--foreground)] focus-visible:opacity-100"
           aria-label={`Comment on ${tag} block at ${startLine === endLine ? `line ${startLine}` : `lines ${startLine}-${endLine}`}`}
           title="Comment on this block"
           onClick={() => addBlockComment(blockId, startLine, endLine)}
         >
-          <MessageSquarePlus size={15} strokeWidth={1.75} aria-hidden="true" />
+          <MessageSquarePlus
+            size={reviewIconSize}
+            strokeWidth={reviewIconStrokeWidth}
+            absoluteStrokeWidth
+            aria-hidden="true"
+          />
         </button>
         {content}
         {annotations.map((comment) => (
@@ -720,10 +1142,7 @@ function DocumentReviewSurface(props: {
               active={currentProps.activeCommentId === comment.id}
               setActiveCommentId={currentProps.setActiveCommentId}
               onChange={(value) => currentProps.updateComment(comment.id, { comment: value })}
-              onFinish={(value) => {
-                if (value.trim().length === 0) currentProps.deleteComment(comment.id);
-                else currentProps.updateComment(comment.id, { comment: value });
-              }}
+              onFinish={(value) => currentProps.updateComment(comment.id, { comment: value })}
               onDelete={() => currentProps.deleteComment(comment.id)}
             />
           </div>
@@ -741,14 +1160,17 @@ function DocumentReviewSurface(props: {
         <li
           {...listItemProps}
           {...blockProps}
-          className={`document-review-block transition-colors ${listItemProps.className ?? ""}`}
+          className={`relative transition-colors duration-[var(--motion-duration)] ease-[var(--motion-ease)] data-[annotated=true]:rounded-[var(--vercel-radius)] data-[annotated=true]:bg-[#0070f3]/10 [&:hover:not(:has([data-document-block]:hover))>[data-document-comment-button]]:opacity-100 ${listItemProps.className ?? ""}`}
         >
           {blockContent}
         </li>
       );
     }
     return (
-      <div {...blockProps} className="document-review-block transition-colors">
+      <div
+        {...blockProps}
+        className="relative transition-colors duration-[var(--motion-duration)] ease-[var(--motion-ease)] data-[annotated=true]:rounded-[var(--vercel-radius)] data-[annotated=true]:bg-[#0070f3]/10 [&:hover:not(:has([data-document-block]:hover))>[data-document-comment-button]]:opacity-100"
+      >
         {blockContent}
       </div>
     );
@@ -873,7 +1295,7 @@ function DocumentReviewSurface(props: {
       <article
         ref={articleRef}
         onMouseUp={handleMouseUp}
-        className="document-review-surface prose prose-slate max-w-none"
+        className="prose prose-slate max-w-none selection:bg-[#0070f3] selection:text-white"
       >
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
           {props.document.markdown}
@@ -994,7 +1416,7 @@ function getSelectedLineRangeFromNativeRange(
   };
 }
 
-function ReviewFileDiff(props: ReviewFileDiffProps) {
+const ReviewFileDiff = React.memo(function ReviewFileDiff(props: ReviewFileDiffProps) {
   const { file, reviewFile } = props;
   const [copied, setCopied] = useState(false);
   const [selectedLines, setSelectedLines] = useState<SelectedLineRange | null | undefined>();
@@ -1005,31 +1427,37 @@ function ReviewFileDiff(props: ReviewFileDiffProps) {
     window.requestAnimationFrame(() => setSelectedLines(undefined));
   }, []);
   const oldFile = useMemo(
-    () => ({ name: file.location, contents: file.oldContent, lang: file.language as never }),
-    [file.location, file.oldContent, file.language],
+    () => ({
+      name: file.location,
+      contents: file.oldContent,
+      lang: file.language as never,
+      cacheKey: `${file.id}:old`,
+    }),
+    [file.id, file.location, file.oldContent, file.language],
   );
   const newFile = useMemo(
-    () => ({ name: file.location, contents: file.newContent, lang: file.language as never }),
-    [file.location, file.newContent, file.language],
+    () => ({
+      name: file.location,
+      contents: file.newContent,
+      lang: file.language as never,
+      cacheKey: `${file.id}:new`,
+    }),
+    [file.id, file.location, file.newContent, file.language],
   );
-  const annotations = useMemo<DiffLineAnnotation<CommentAnnotationMetadata>[]>(() => {
-    return reviewFile.comments
-      .filter((comment) => comment.startLine !== null && comment.endLine !== null)
-      .map((comment) => ({
-        side: comment.side,
-        lineNumber: comment.endLine ?? comment.startLine ?? 0,
-        metadata: { commentId: comment.id },
-      }));
-  }, [reviewFile.comments]);
-  const diffOptions = useMemo<
-    NonNullable<MultiFileDiffProps<CommentAnnotationMetadata>["options"]>
-  >(
+  const fileDiff = useMemo(() => {
+    const cached = parsedFileDiffCache.get(file);
+    if (cached) return cached;
+    const parsed = parseDiffFromFile(oldFile, newFile);
+    parsedFileDiffCache.set(file, parsed);
+    return parsed;
+  }, [file, newFile, oldFile]);
+  const diffOptions = useMemo<NonNullable<FileDiffProps<CommentAnnotationMetadata>["options"]>>(
     () => ({
       theme: "github-light",
       diffStyle: "unified",
       diffIndicators: "classic",
       hunkSeparators: "metadata",
-      lineDiffType: "word",
+      lineDiffType: file.added + file.removed > largeDiffWordHighlightThreshold ? "none" : "word",
       unsafeCSS: reviewDiffUnsafeCSS,
       enableLineSelection: true,
       onLineSelectionEnd: (range) => {
@@ -1050,6 +1478,26 @@ function ReviewFileDiff(props: ReviewFileDiffProps) {
     [clearSelectedLines, file],
   );
 
+  const commentsById = useMemo(
+    () => new Map(reviewFile.comments.map((comment) => [comment.id, comment])),
+    [reviewFile.comments],
+  );
+  const lineAnnotations = useMemo<DiffLineAnnotation<CommentAnnotationMetadata>[]>(
+    () =>
+      reviewFile.comments.flatMap((comment) =>
+        comment.endLine === null
+          ? []
+          : [
+              {
+                side: comment.side,
+                lineNumber: comment.endLine,
+                metadata: { commentId: comment.id },
+              },
+            ],
+      ),
+    [reviewFile.comments],
+  );
+
   async function copyPath() {
     try {
       await navigator.clipboard.writeText(file.location);
@@ -1067,12 +1515,15 @@ function ReviewFileDiff(props: ReviewFileDiffProps) {
   return (
     <Disclosure
       id={file.id}
-      className="overflow-hidden rounded-[var(--vercel-radius)] border border-slate-300 bg-white"
+      className="overflow-clip rounded-[var(--vercel-radius)] border border-slate-300 bg-white"
     >
-      <Disclosure.Heading>
-        <Disclosure.Trigger className="group flex w-full items-center justify-between gap-4 bg-white px-4 py-3 text-left transition-colors hover:bg-slate-50">
+      <Disclosure.Heading
+        data-review-file-heading={file.id}
+        className="sticky top-[var(--review-header-height,0px)] z-[5] bg-white"
+      >
+        <Disclosure.Trigger className="group flex w-full items-center justify-between gap-4 bg-white px-4 py-3 text-left transition-colors duration-[var(--motion-duration)] ease-[var(--motion-ease)] hover:bg-slate-50">
           <span className="flex min-w-0 items-center gap-3">
-            <Disclosure.Indicator className="shrink-0 text-slate-500 transition-transform group-data-[expanded=true]:rotate-90" />
+            <Disclosure.Indicator className="shrink-0 text-slate-500 transition-transform duration-[var(--motion-duration)] ease-[var(--motion-ease)] group-data-[expanded=true]:rotate-90" />
             <span className="min-w-0">
               <Typography
                 type="body-sm"
@@ -1098,50 +1549,20 @@ function ReviewFileDiff(props: ReviewFileDiffProps) {
           </span>
         </Disclosure.Trigger>
       </Disclosure.Heading>
-      <Disclosure.Content className="border-t border-slate-200">
+      <Disclosure.Content className="border-t border-slate-200 !transition-none aria-hidden:border-t-0">
         <Card className="border-0 bg-white shadow-none" variant="transparent">
           <Card.Content className="p-0">
-            <MultiFileDiff<CommentAnnotationMetadata>
-              className="review-diff-surface block"
-              oldFile={oldFile}
-              newFile={newFile}
-              disableWorkerPool
+            <FileDiff<CommentAnnotationMetadata>
+              className="block font-mono [--review-radius:var(--vercel-radius)]"
+              fileDiff={fileDiff}
+              lineAnnotations={lineAnnotations}
               selectedLines={selectedLines}
-              lineAnnotations={annotations}
               options={diffOptions}
-              renderHeaderMetadata={() => (
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="font-normal"
-                    onClick={copyPath}
-                    aria-label="Copy file path"
-                  >
-                    {copied ? (
-                      <Check size={14} strokeWidth={1.5} absoluteStrokeWidth aria-hidden="true" />
-                    ) : (
-                      <CopyIcon
-                        size={14}
-                        strokeWidth={1.5}
-                        absoluteStrokeWidth
-                        aria-hidden="true"
-                      />
-                    )}
-                    <Typography type="body-sm" weight="normal" className="leading-none">
-                      {copied ? "Copied" : "Copy"}
-                    </Typography>
-                  </Button>
-                </div>
-              )}
               renderAnnotation={(annotation) => {
-                const comment = reviewFile.comments.find(
-                  (item) => item.id === annotation.metadata.commentId,
-                );
+                const comment = commentsById.get(annotation.metadata.commentId);
                 if (!comment) return null;
                 return (
                   <CommentAnnotation
-                    key={comment.id}
                     file={file}
                     comment={comment}
                     active={props.activeCommentId === comment.id}
@@ -1152,13 +1573,43 @@ function ReviewFileDiff(props: ReviewFileDiffProps) {
                   />
                 );
               }}
+              renderHeaderMetadata={() => (
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="font-normal"
+                    onClick={copyPath}
+                    aria-label="Copy file path"
+                  >
+                    {copied ? (
+                      <Check
+                        size={reviewIconSize}
+                        strokeWidth={reviewIconStrokeWidth}
+                        absoluteStrokeWidth
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <CopyIcon
+                        size={reviewIconSize}
+                        strokeWidth={reviewIconStrokeWidth}
+                        absoluteStrokeWidth
+                        aria-hidden="true"
+                      />
+                    )}
+                    <Typography type="body-sm" weight="normal" className="leading-none">
+                      {copied ? "Copied" : "Copy"}
+                    </Typography>
+                  </Button>
+                </div>
+              )}
             />
           </Card.Content>
         </Card>
       </Disclosure.Content>
     </Disclosure>
   );
-}
+});
 
 function CommentAnnotation(props: {
   file: ReviewSourceFile;
@@ -1179,8 +1630,7 @@ function CommentAnnotation(props: {
       onChange={(value) => props.updateComment(props.file.location, comment.id, { comment: value })}
       onFinish={(value) => {
         props.clearSelectedLines();
-        if (value.trim().length === 0) props.deleteComment(props.file.location, comment.id);
-        else props.updateComment(props.file.location, comment.id, { comment: value });
+        props.updateComment(props.file.location, comment.id, { comment: value });
       }}
       onDelete={() => {
         props.clearSelectedLines();
@@ -1207,7 +1657,7 @@ function CommentEditor(props: {
   });
 
   function finishComment(value: string) {
-    props.onFinish(value);
+    CommentDraft.finish(value, { onDelete: props.onDelete, onFinish: props.onFinish });
     props.setActiveCommentId(null);
   }
 
@@ -1242,7 +1692,6 @@ function CommentEditor(props: {
       <form.Field
         name="comment"
         listeners={{
-          onChangeDebounceMs: 750,
           onChange: ({ value }) => props.onChange(value),
           onBlur: ({ value }) => finishComment(value),
         }}
@@ -1252,7 +1701,7 @@ function CommentEditor(props: {
             <TextArea
               ref={textareaRef}
               aria-label="Review comment"
-              className="min-h-11 w-full overflow-hidden pr-10 font-sans text-sm leading-5"
+              className="block min-h-11 w-full overflow-hidden pr-10 font-sans text-sm leading-5"
               placeholder="Add review comment..."
               value={field.state.value}
               variant="secondary"
@@ -1266,16 +1715,19 @@ function CommentEditor(props: {
               rows={1}
               style={{ resize: "none" }}
             />
-            {field.state.value.length > 0 ? (
-              <CloseButton
-                aria-label="Clear comment"
-                className="absolute right-2 top-2 z-10 text-slate-500 hover:text-slate-900"
-                onMouseDown={(event) => event.preventDefault()}
-                onPress={handleClearComment}
-              >
-                <X size={14} strokeWidth={1.5} absoluteStrokeWidth aria-hidden="true" />
-              </CloseButton>
-            ) : null}
+            <CloseButton
+              aria-label="Delete comment"
+              className="absolute right-2 top-2 z-10 text-slate-500 hover:text-slate-900"
+              onMouseDown={(event) => event.preventDefault()}
+              onPress={handleClearComment}
+            >
+              <X
+                size={reviewIconSize}
+                strokeWidth={reviewIconStrokeWidth}
+                absoluteStrokeWidth
+                aria-hidden="true"
+              />
+            </CloseButton>
           </div>
         )}
       </form.Field>
@@ -1304,6 +1756,17 @@ function resizeTextarea(textarea: HTMLTextAreaElement) {
 createRoot(document.getElementById("root")!).render(
   <>
     <Toast.Provider placement="bottom end" />
-    <App />
+    <WorkerPoolContextProvider
+      poolOptions={{
+        poolSize: Math.min(4, navigator.hardwareConcurrency || 2),
+        workerFactory: () => new DiffsWorker(),
+      }}
+      highlighterOptions={{
+        lineDiffType: "word",
+        theme: "github-light",
+      }}
+    >
+      <App />
+    </WorkerPoolContextProvider>
   </>,
 );

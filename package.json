@@ -18,35 +18,48 @@
     "url": "git+https://github.com/rendotdev/lgtm.git"
   },
   "bin": {
-    "lgtm": "dist/cli.mjs"
+    "lgtm": "bin/lgtm.mjs"
   },
   "files": [
-    "README.md",
-    "extensions/lgtm.ts",
+    ".agents/plugins/marketplace.json",
+    ".claude-plugin",
+    ".codex-plugin/plugin.json",
+    ".mcp.claude.json",
+    ".mcp.json",
+    "bin",
     "dist",
-    "src",
-    "tsconfig.json"
+    "skills",
+    "LICENSE",
+    "README.md"
   ],
   "type": "module",
   "scripts": {
-    "lgtm": "node src/cli.ts",
+    "lgtm": "node src/interfaces/cli/cli.ts",
+    "metadata:check": "bun scripts/sync-plugin-metadata.ts --check",
+    "metadata:sync": "bun scripts/sync-plugin-metadata.ts",
     "pack:dry": "npm pack --dry-run",
-    "prepack": "vp run package"
+    "prepack": "npm run metadata:check && vp run package",
+    "release:patch": "bun scripts/release.ts patch",
+    "release:minor": "bun scripts/release.ts minor",
+    "release:major": "bun scripts/release.ts major"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "^0.80.3",
-    "@earendil-works/pi-coding-agent": "^0.80.3",
+    "@earendil-works/pi-ai": "^0.80.6",
+    "@earendil-works/pi-coding-agent": "^0.80.6",
+    "@fontsource-variable/geist": "^5.2.9",
+    "@fontsource-variable/geist-mono": "^5.2.8",
     "@heroui/react": "^3.2.2",
     "@heroui/styles": "^3.2.2",
     "@pierre/diffs": "^1.2.12",
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.3.2",
     "@tanstack/react-form": "^1.33.1",
+    "@tanstack/react-virtual": "^3.14.5",
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "geist": "^1.7.2",
     "lucide-react": "^1.23.0",
+    "motion": "^12.42.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
@@ -73,17 +86,20 @@
   "devEngines": {
     "packageManager": {
       "name": "npm",
-      "version": "11.16.0",
+      "version": "11.12.1",
       "onFail": "download"
     }
   },
   "engines": {
     "node": ">=22.18.0"
   },
-  "packageManager": "npm@11.16.0",
+  "packageManager": "npm@11.12.1",
   "pi": {
     "extensions": [
-      "extensions/lgtm.ts"
+      "dist/pi/lgtm.mjs"
+    ],
+    "skills": [
+      "skills"
     ]
   }
 }

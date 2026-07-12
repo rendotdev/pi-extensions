@@ -1,0 +1,29 @@
+{
+  "name": "lgtm",
+  "version": "0.1.0",
+  "description": "Human approval for agent work, with code diff and Markdown review.",
+  "author": {
+    "name": "René-Pier Deshaies-Gélinas",
+    "url": "https://github.com/rendotdev"
+  },
+  "homepage": "https://github.com/rendotdev/lgtm#readme",
+  "repository": "https://github.com/rendotdev/lgtm",
+  "license": "MIT",
+  "keywords": ["ai-agents", "code-review", "human-in-the-loop"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "LGTM",
+    "shortDescription": "Review agent work with human approval",
+    "longDescription": "Open a local browser checkpoint to review code changes or Markdown, leave contextual comments, and approve agent work.",
+    "developerName": "rendotdev",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Write"],
+    "websiteURL": "https://github.com/rendotdev/lgtm",
+    "defaultPrompt": [
+      "Use LGTM to present this work for human review.",
+      "Open an LGTM review for the current Git changes."
+    ],
+    "brandColor": "#16A34A"
+  }
+}

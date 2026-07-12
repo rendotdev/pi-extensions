@@ -1,0 +1,26 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "rendotdev",
+  "description": "Agent tools by rendotdev.",
+  "owner": {
+    "name": "René-Pier Deshaies-Gélinas"
+  },
+  "plugins": [
+    {
+      "name": "lgtm",
+      "source": {
+        "source": "npm",
+        "package": "@rendotdev/lgtm",
+        "version": "0.1.0"
+      },
+      "description": "Human approval for agent work, with code diff and Markdown review.",
+      "version": "0.1.0",
+      "author": {
+        "name": "René-Pier Deshaies-Gélinas"
+      },
+      "category": "Development",
+      "tags": ["code-review", "human-in-the-loop"],
+      "strict": true
+    }
+  ]
+}

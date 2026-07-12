@@ -1,0 +1,4 @@
+interface:
+  display_name: "LGTM"
+  short_description: "Review agent work with human approval"
+  default_prompt: "Use $lgtm to present this work for human review and continue from the result."

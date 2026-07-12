@@ -3,11 +3,12 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "types": ["node"]
+    "types": ["node", "vite/client"]
   },
-  "include": ["extensions/**/*.ts", "src/**/*.ts"]
+  "include": ["scripts/**/*.ts", "src/**/*.ts"]
 }

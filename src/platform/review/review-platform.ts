@@ -1,120 +1,22 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { unlinkSync } from "node:fs";
 import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, resolve, sep } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-
-export type DiffReviewFileInput = {
-  location: string;
-  oldContent: string;
-  newContent: string;
-};
-
-export type ReviewPointer = {
-  name: string;
-  sessionId: string;
-  reviewUUID: string;
-  reviewId: string;
-  appDir: string;
-  url: string;
-  reviewPath: string;
-};
-
-type ReviewSourceFile = {
-  id: string;
-  location: string;
-  language: string;
-  oldContent: string;
-  newContent: string;
-  added: number;
-  removed: number;
-};
-
-export type DocumentSource = {
-  location?: string;
-  markdown: string;
-};
-
-type DocumentComment = {
-  id: string;
-  selectedText: string;
-  startBlockId: string;
-  endBlockId: string;
-  startLine: number;
-  endLine: number;
-  prefix: string;
-  suffix: string;
-  comment: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-type ReviewComment = {
-  id: string;
-  fileLocation: string;
-  selectedRowIds: string[];
-  selectedText: string;
-  side: "additions" | "deletions";
-  selectedRange: {
-    start: number;
-    end: number;
-    side?: "additions" | "deletions";
-    endSide?: "additions" | "deletions";
-  };
-  startLine: number | null;
-  endLine: number | null;
-  lineNumbers: number[];
-  comment: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-type ReviewFile = {
-  location: string;
-  added: number;
-  removed: number;
-  comments: ReviewComment[];
-};
-
-export type ReviewStatus = "open" | "approved" | "changes_requested" | "canceled";
-
-export type ReviewJson = {
-  version: 2;
-  kind: "diff" | "document";
-  status: ReviewStatus;
-  name: string;
-  sessionId: string;
-  reviewUUID: string;
-  reviewId: string;
-  sessionUUID?: string;
-  cwd: string;
-  appDir: string;
-  url?: string;
-  htmlPath?: string;
-  reviewPath: string;
-  createdAt: string;
-  updatedAt: string;
-  finishedAt?: string;
-  files: ReviewFile[];
-  document?: DocumentSource;
-  documentComments: DocumentComment[];
-};
-
-export type ReviewPayload = {
-  kind: "diff" | "document";
-  name: string;
-  sessionId: string;
-  reviewUUID: string;
-  reviewId: string;
-  cwd: string;
-  appDir: string;
-  reviewPath: string;
-  generatedAt: string;
-  files: ReviewSourceFile[];
-  document?: DocumentSource;
-};
+import {
+  reviewBuilder,
+  reviewFormatter,
+  reviewSourceBuilder,
+  type DiffReviewFileInput,
+  type OpenReviewInput,
+  type ReviewJson,
+  type ReviewOutcome,
+  type ReviewPayload,
+  type ReviewPointer,
+} from "../../domain/review/review.ts";
 
 type CommandResult = {
   stdout: string;
@@ -135,6 +37,7 @@ type ReviewServerState = ReviewServerInfo & {
 
 const lastReviewByCwd = new Map<string, ReviewPointer>();
 const activeReviewServersByCwd = new Map<string, ReviewServerState>();
+const cleanupReviewServersByPath = new Map<string, ReviewServerState>();
 const abortCleanupByCwd = new Map<string, () => void>();
 const finishWatchersByReviewPath = new Map<string, ReturnType<typeof setInterval>>();
 let processCleanupRegistered = false;
@@ -143,18 +46,15 @@ function sanitizePathSegment(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 160) || randomUUID();
 }
 
-export type OpenReviewInput = {
-  kind: "diff" | "document";
-  name: string;
-  files?: DiffReviewFileInput[];
-  document?: DocumentSource;
-};
-
 export type OpenReviewOptions = {
   cwd: string;
   sessionId?: string;
   signal?: AbortSignal;
   cleanupOnExit?: boolean;
+  detachedServer?: boolean;
+  openBrowser?: boolean;
+  replaceActiveReview?: boolean;
+  trackAsActiveReview?: boolean;
   onUpdate?: (message: string) => void;
   onFinished?: (review: ReviewJson, formattedReview: string) => void | Promise<void>;
 };
@@ -170,13 +70,17 @@ export async function openReview(
   const appDir = resolve(cwd, ".lgtm", reviewId);
   const reviewPath = join(appDir, "review.json");
   const generatedAt = new Date().toISOString();
-  const files = (input.files ?? []).map((file, index) => buildReviewSourceFile(file, index));
+  const files = (input.files ?? []).map((file, index) =>
+    reviewSourceBuilder.build({ file, index }),
+  );
 
-  options.onUpdate?.("Stopping any previous LGTM review server...");
-  await stopActiveReviewServer(cwd);
+  if (options.replaceActiveReview !== false) {
+    options.onUpdate?.("Stopping any previous LGTM review server...");
+    await stopActiveReviewServer(cwd);
+  }
   await mkdir(appDir, { recursive: true });
 
-  const review = buildReviewJson({
+  const review = reviewBuilder.build({
     kind: input.kind,
     name: input.name,
     sessionId: sessionId,
@@ -205,56 +109,63 @@ export async function openReview(
   await writeReviewApp(appDir, payload, review);
 
   options.onUpdate?.("Starting LGTM review server...");
-  const server = await startReviewServer(appDir, options.signal);
-  const url = server.url;
-  await writeFile(
-    reviewPath,
-    `${JSON.stringify({ ...review, url, updatedAt: new Date().toISOString() }, null, 2)}\n`,
-    "utf8",
-  );
-
+  const server = await startReviewServer(appDir, options.signal, options.detachedServer);
   const serverState: ReviewServerState = {
     ...server,
     appDir,
     reviewId,
     startedAt: new Date().toISOString(),
   };
-  await writeReviewServerState(cwd, serverState);
-  activeReviewServersByCwd.set(cwd, serverState);
-  if (options.signal) {
-    const abort = () => void stopActiveReviewServer(cwd);
-    options.signal.addEventListener("abort", abort, { once: true });
-    abortCleanupByCwd.set(cwd, () => options.signal?.removeEventListener("abort", abort));
-    if (options.signal.aborted) abort();
+  try {
+    throwIfAborted(options.signal);
+    const url = server.url;
+    await writeFile(
+      reviewPath,
+      `${JSON.stringify({ ...review, url, updatedAt: new Date().toISOString() }, null, 2)}\n`,
+      "utf8",
+    );
+
+    if (options.trackAsActiveReview !== false) {
+      await writeReviewServerState(cwd, serverState);
+      activeReviewServersByCwd.set(cwd, serverState);
+    }
+    if (options.signal && options.trackAsActiveReview !== false) {
+      const abort = () => void stopActiveReviewServer(cwd);
+      options.signal.addEventListener("abort", abort, { once: true });
+      abortCleanupByCwd.set(cwd, () => options.signal?.removeEventListener("abort", abort));
+      if (options.signal.aborted) abort();
+    }
+    if (options.cleanupOnExit) {
+      cleanupReviewServersByPath.set(reviewPath, serverState);
+      registerProcessCleanup();
+    }
+
+    const pointer: ReviewPointer = {
+      name: input.name,
+      sessionId: sessionId,
+      reviewUUID,
+      reviewId,
+      appDir,
+      url,
+      reviewPath,
+    };
+    lastReviewByCwd.set(cwd, pointer);
+    if (options.onFinished) startReviewFinishWatcher(cwd, pointer, options.onFinished);
+    if (options.openBrowser !== false) openInDefaultBrowser(url);
+    return pointer;
+  } catch (error) {
+    if (options.trackAsActiveReview !== false) {
+      abortCleanupByCwd.get(cwd)?.();
+      abortCleanupByCwd.delete(cwd);
+      if (activeReviewServersByCwd.get(cwd) === serverState) {
+        activeReviewServersByCwd.delete(cwd);
+      }
+      await unlink(getActiveReviewServerPath(cwd)).catch(() => undefined);
+    }
+    cleanupReviewServersByPath.delete(reviewPath);
+    await stopReviewServerProcess(serverState).catch(() => false);
+    throw error;
   }
-  if (options.cleanupOnExit) registerProcessCleanup();
-
-  const pointer: ReviewPointer = {
-    name: input.name,
-    sessionId: sessionId,
-    reviewUUID,
-    reviewId,
-    appDir,
-    url,
-    reviewPath,
-  };
-  lastReviewByCwd.set(cwd, pointer);
-  if (options.onFinished) startReviewFinishWatcher(cwd, pointer, options.onFinished);
-  openInDefaultBrowser(url);
-  return pointer;
-}
-
-function buildReviewSourceFile(file: DiffReviewFileInput, index: number): ReviewSourceFile {
-  const counts = countChangedLines(file.oldContent, file.newContent);
-  return {
-    id: `file-${index}`,
-    location: file.location,
-    language: languageFromPath(file.location),
-    oldContent: file.oldContent,
-    newContent: file.newContent,
-    added: counts.added,
-    removed: counts.removed,
-  };
 }
 
 export async function collectGitReviewFiles(
@@ -389,93 +300,6 @@ async function readWorkingTreeFile(root: string, path: string): Promise<string> 
   }
 }
 
-function splitLines(text: string): string[] {
-  if (text.length === 0) return [];
-  return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-}
-
-function countChangedLines(oldText: string, newText: string): { added: number; removed: number } {
-  const oldLines = splitLines(oldText);
-  const newLines = splitLines(newText);
-  const cellCount = (oldLines.length + 1) * (newLines.length + 1);
-  if (cellCount > 2_000_000) {
-    return { added: newLines.length, removed: oldLines.length };
-  }
-
-  const width = newLines.length + 1;
-  const matrix = new Uint32Array(cellCount);
-  for (let i = oldLines.length - 1; i >= 0; i -= 1) {
-    for (let j = newLines.length - 1; j >= 0; j -= 1) {
-      if (oldLines[i] === newLines[j]) {
-        matrix[i * width + j] = matrix[(i + 1) * width + j + 1] + 1;
-      } else {
-        matrix[i * width + j] = Math.max(matrix[(i + 1) * width + j], matrix[i * width + j + 1]);
-      }
-    }
-  }
-
-  let i = 0;
-  let j = 0;
-  let added = 0;
-  let removed = 0;
-  while (i < oldLines.length && j < newLines.length) {
-    if (oldLines[i] === newLines[j]) {
-      i += 1;
-      j += 1;
-    } else if (matrix[(i + 1) * width + j] >= matrix[i * width + j + 1]) {
-      removed += 1;
-      i += 1;
-    } else {
-      added += 1;
-      j += 1;
-    }
-  }
-  removed += oldLines.length - i;
-  added += newLines.length - j;
-  return { added, removed };
-}
-
-function languageFromPath(location: string): string {
-  const ext = extname(location).toLowerCase();
-  const map: Record<string, string> = {
-    ".astro": "astro",
-    ".bash": "bash",
-    ".c": "c",
-    ".cpp": "cpp",
-    ".cs": "csharp",
-    ".css": "css",
-    ".diff": "diff",
-    ".go": "go",
-    ".graphql": "graphql",
-    ".h": "c",
-    ".html": "html",
-    ".java": "java",
-    ".js": "javascript",
-    ".json": "json",
-    ".jsx": "jsx",
-    ".kt": "kotlin",
-    ".lua": "lua",
-    ".md": "markdown",
-    ".mdx": "mdx",
-    ".php": "php",
-    ".py": "python",
-    ".rb": "ruby",
-    ".rs": "rust",
-    ".scss": "scss",
-    ".sh": "bash",
-    ".svelte": "svelte",
-    ".toml": "toml",
-    ".ts": "typescript",
-    ".tsx": "tsx",
-    ".vue": "vue",
-    ".xml": "xml",
-    ".yaml": "yaml",
-    ".yml": "yaml",
-    ".zsh": "bash",
-  };
-  return map[ext] ?? "plaintext";
-}
-
 async function readReviewIfExists(reviewPath: string): Promise<ReviewJson | undefined> {
   try {
     return JSON.parse(await readFile(reviewPath, "utf8")) as ReviewJson;
@@ -484,62 +308,23 @@ async function readReviewIfExists(reviewPath: string): Promise<ReviewJson | unde
   }
 }
 
-function buildReviewJson(input: {
-  kind: "diff" | "document";
-  name: string;
-  sessionId: string;
-  reviewUUID: string;
-  reviewId: string;
-  cwd: string;
-  appDir: string;
-  reviewPath: string;
-  generatedAt: string;
-  files: ReviewSourceFile[];
-  document?: DocumentSource;
-  existingReview?: ReviewJson;
-}): ReviewJson {
-  const existingByLocation = new Map<string, ReviewFile>();
-  for (const file of input.existingReview?.files ?? []) {
-    existingByLocation.set(file.location, file);
-  }
-
-  return {
-    version: 2,
-    kind: input.kind,
-    status: "open",
-    name: input.name,
-    sessionId: input.sessionId,
-    reviewUUID: input.reviewUUID,
-    reviewId: input.reviewId,
-    cwd: input.cwd,
-    appDir: input.appDir,
-    reviewPath: input.reviewPath,
-    createdAt: input.existingReview?.createdAt ?? input.generatedAt,
-    updatedAt: input.generatedAt,
-    files: input.files.map((file) => ({
-      location: file.location,
-      added: file.added,
-      removed: file.removed,
-      comments: existingByLocation.get(file.location)?.comments ?? [],
-    })),
-    document: input.document,
-    documentComments: input.existingReview?.documentComments ?? [],
-  };
-}
-
 async function writeReviewApp(appDir: string, payload: ReviewPayload, review: ReviewJson) {
   await mkdir(appDir, { recursive: true });
   await writeFile(join(appDir, "payload.json"), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
   await writeFile(join(appDir, "review.json"), `${JSON.stringify(review, null, 2)}\n`, "utf8");
 }
 
-async function startReviewServer(appDir: string, signal?: AbortSignal): Promise<ReviewServerInfo> {
+async function startReviewServer(
+  appDir: string,
+  signal?: AbortSignal,
+  detached = true,
+): Promise<ReviewServerInfo> {
   const cliPath = await resolveCliPath();
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn("node", [cliPath, "serve", "--app-dir", appDir], {
       cwd: appDir,
       env: { ...process.env },
-      detached: true,
+      detached,
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -579,9 +364,11 @@ async function startReviewServer(appDir: string, signal?: AbortSignal): Promise<
       }
       settled = true;
       cleanup();
-      (child.stdout as unknown as { unref?: () => void } | undefined)?.unref?.();
-      (child.stderr as unknown as { unref?: () => void } | undefined)?.unref?.();
-      child.unref();
+      if (detached) {
+        (child.stdout as unknown as { unref?: () => void } | undefined)?.unref?.();
+        (child.stderr as unknown as { unref?: () => void } | undefined)?.unref?.();
+        child.unref();
+      }
       await writeFile(join(appDir, "server.pid"), `${pid}\n`, "utf8");
       resolvePromise({ url, pid });
     };
@@ -616,8 +403,8 @@ async function startReviewServer(appDir: string, signal?: AbortSignal): Promise<
 
 async function resolveCliPath() {
   const modulePath = fileURLToPath(import.meta.url);
-  if (modulePath.endsWith(`${sep}src${sep}core.ts`)) {
-    return resolve(modulePath, "..", "cli.ts");
+  if (modulePath.endsWith(`${sep}src${sep}platform${sep}review${sep}review-platform.ts`)) {
+    return resolve(modulePath, "..", "..", "..", "interfaces", "cli", "cli.ts");
   }
   return modulePath;
 }
@@ -674,6 +461,8 @@ export async function serveReviewApp(appDirInput: string): Promise<void> {
           status: "canceled" as const,
           updatedAt: now,
           finishedAt: now,
+          files: review.files.map((file) => ({ ...file, comments: [] })),
+          documentComments: [],
         };
         await writeJsonFile(reviewPath, nextReview);
         sendJson(response, 200, nextReview);
@@ -717,6 +506,7 @@ async function resolveWebRoot() {
     process.env.LGTM_WEB_ROOT,
     resolve(modulePath, "..", "web"),
     resolve(modulePath, "..", "..", "dist", "web"),
+    resolve(modulePath, "..", "..", "..", "..", "dist", "web"),
   ].filter((candidate): candidate is string => Boolean(candidate));
 
   for (const candidate of candidates) {
@@ -832,12 +622,12 @@ async function stopActiveReviewServer(cwd: string) {
   if (state) {
     await stopReviewFinishWatcherForAppDir(state.appDir);
     stopped = await stopReviewServerProcess(state);
+    cleanupReviewServersByPath.delete(join(state.appDir, "review.json"));
     activeReviewServersByCwd.delete(cwd);
     await unlink(getActiveReviewServerPath(cwd)).catch(() => undefined);
   }
 
-  const staleStopped = await stopKnownReviewServers(cwd);
-  return stopped || staleStopped;
+  return stopped;
 }
 
 async function stopKnownReviewServers(cwd: string) {
@@ -867,6 +657,7 @@ async function stopKnownReviewServers(cwd: string) {
       })
     ) {
       stopReviewFinishWatcher(review?.reviewPath ?? join(appDir, "review.json"));
+      cleanupReviewServersByPath.delete(review?.reviewPath ?? join(appDir, "review.json"));
       stopped = true;
     }
   }
@@ -936,8 +727,16 @@ async function stopReviewServerForReview(cwd: string, review: ReviewJson, review
     reviewId: review.reviewId,
     startedAt: review.updatedAt,
   });
+  cleanupReviewServersByPath.delete(reviewPath);
   if (stopped) stopReviewFinishWatcher(review.reviewPath ?? reviewPath);
   return stopped;
+}
+
+export async function stopReview(cwd: string, reviewPath: string) {
+  const review = await readReviewIfExists(reviewPath);
+  if (!review) return false;
+  stopReviewFinishWatcher(reviewPath);
+  return await stopReviewServerForReview(resolve(cwd), review, reviewPath);
 }
 
 async function readReviewServerPid(appDir: string) {
@@ -1036,8 +835,15 @@ function registerProcessCleanup() {
   if (processCleanupRegistered) return;
   processCleanupRegistered = true;
   process.once("exit", () => {
-    for (const state of activeReviewServersByCwd.values()) {
+    for (const state of cleanupReviewServersByPath.values()) {
       killReviewServerPid(state.pid, "SIGTERM");
+    }
+    for (const cwd of activeReviewServersByCwd.keys()) {
+      try {
+        unlinkSync(getActiveReviewServerPath(cwd));
+      } catch {
+        // Already removed.
+      }
     }
   });
 }
@@ -1104,9 +910,100 @@ export type FinishReviewResult =
       formattedReview: string;
     };
 
-export async function finishReview(cwd: string): Promise<FinishReviewResult> {
+export type WaitForReviewOptions = {
+  cwd: string;
+  signal?: AbortSignal;
+  pollIntervalMs?: number;
+  stopServer?: boolean;
+};
+
+export type CompletedReview = {
+  reviewPath: string;
+  review: ReviewJson & { status: ReviewOutcome };
+  stoppedServer: boolean;
+  formattedReview: string;
+};
+
+/**
+ * Wait for the browser checkpoint to reach a terminal decision. This is the
+ * lifecycle used by synchronous agent protocols such as MCP: the tool call
+ * remains pending until the human approves, requests changes, or cancels.
+ */
+export async function waitForReview(
+  pointer: ReviewPointer,
+  options: WaitForReviewOptions,
+): Promise<CompletedReview> {
+  const pollIntervalMs = options.pollIntervalMs ?? 250;
+  if (!Number.isFinite(pollIntervalMs) || pollIntervalMs < 10) {
+    throw new Error("pollIntervalMs must be at least 10 milliseconds.");
+  }
+
+  try {
+    while (true) {
+      throwIfAborted(options.signal);
+      const review = await readReviewIfExists(pointer.reviewPath);
+      if (review && review.status !== "open") {
+        stopReviewFinishWatcher(pointer.reviewPath);
+        const stoppedServer =
+          options.stopServer === false
+            ? false
+            : await stopReviewServerForReview(resolve(options.cwd), review, pointer.reviewPath);
+        return {
+          reviewPath: pointer.reviewPath,
+          review: review as ReviewJson & { status: ReviewOutcome },
+          stoppedServer,
+          formattedReview: formatReviewForModel(review, pointer.reviewPath),
+        };
+      }
+      await abortableDelay(pollIntervalMs, options.signal);
+    }
+  } catch (error) {
+    if (options.signal?.aborted && options.stopServer !== false) {
+      await stopReview(options.cwd, pointer.reviewPath).catch(() => false);
+    }
+    throw error;
+  }
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (!signal?.aborted) return;
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException("The review was canceled.", "AbortError");
+}
+
+function abortableDelay(milliseconds: number, signal?: AbortSignal) {
+  return new Promise<void>((resolvePromise, rejectPromise) => {
+    const timeout = setTimeout(finish, milliseconds);
+    const abort = () => {
+      cleanup();
+      rejectPromise(
+        signal?.reason instanceof Error
+          ? signal.reason
+          : new DOMException("The review was canceled.", "AbortError"),
+      );
+    };
+    const cleanup = () => {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", abort);
+    };
+    function finish() {
+      cleanup();
+      resolvePromise();
+    }
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+  });
+}
+
+export async function finishReview(
+  cwd: string,
+  explicitReviewPath?: string,
+): Promise<FinishReviewResult> {
   const resolvedCwd = resolve(cwd);
-  const reviewPath = await resolveReviewPath(resolvedCwd);
+  const reviewPath = explicitReviewPath
+    ? resolve(resolvedCwd, explicitReviewPath)
+    : await resolveReviewPath(resolvedCwd);
   if (!reviewPath) return { found: false };
 
   const review = JSON.parse(await readFile(reviewPath, "utf8")) as ReviewJson;
@@ -1123,7 +1020,10 @@ export async function finishReview(cwd: string): Promise<FinishReviewResult> {
 
 export async function stopReviews(cwd: string) {
   stopAllReviewFinishWatchers();
-  return await stopActiveReviewServer(resolve(cwd));
+  const resolvedCwd = resolve(cwd);
+  const activeStopped = await stopActiveReviewServer(resolvedCwd);
+  const knownStopped = await stopKnownReviewServers(resolvedCwd);
+  return activeStopped || knownStopped;
 }
 
 async function resolveReviewPath(cwd: string): Promise<string | undefined> {
@@ -1156,76 +1056,5 @@ async function findLatestReviewPath(cwd: string): Promise<string | undefined> {
 }
 
 export function formatReviewForModel(review: ReviewJson, reviewPath: string): string {
-  const lines: string[] = [];
-  lines.push(`# ${review.kind === "document" ? "Document" : "Diff"} review: ${review.name}`);
-  lines.push("");
-  lines.push(`Review JSON: ${reviewPath}`);
-  lines.push(`Session: ${review.sessionId ?? review.sessionUUID ?? "unknown"}`);
-  lines.push(`Review ID: ${review.reviewId ?? review.sessionUUID ?? "unknown"}`);
-  lines.push(`Review UUID: ${review.reviewUUID ?? "unknown"}`);
-  lines.push(`Status: ${review.status ?? "open"}`);
-  if (review.finishedAt) lines.push(`Finished: ${review.finishedAt}`);
-  if (review.url) lines.push(`Review app URL: ${review.url}`);
-  lines.push(`Updated: ${review.updatedAt}`);
-  lines.push("");
-
-  if (review.kind === "document") {
-    if (review.document?.location) lines.push(`Document: ${review.document.location}`, "");
-    const comments = review.documentComments.filter((comment) => comment.comment.trim().length > 0);
-    for (const comment of comments) {
-      const range =
-        comment.startLine === comment.endLine
-          ? `Line ${comment.startLine}`
-          : `Lines ${comment.startLine}-${comment.endLine}`;
-      lines.push(`## ${range}`);
-      lines.push("");
-      lines.push(`Selected text: ${truncateForReview(comment.selectedText.trim() || "(none)")}`);
-      lines.push(`Comment: ${comment.comment.trim()}`);
-      lines.push("");
-    }
-    if (comments.length === 0) lines.push("No written review comments were found.");
-    return lines.join("\n");
-  }
-
-  let commentCount = 0;
-  for (const file of review.files) {
-    lines.push(`## ${file.location}`);
-    lines.push(`Changes: +${file.added} -${file.removed}`);
-
-    if (file.comments.length === 0) {
-      lines.push("");
-      lines.push("No comments for this file.");
-      lines.push("");
-      continue;
-    }
-
-    for (const comment of file.comments) {
-      if (comment.comment.trim().length === 0) continue;
-      commentCount += 1;
-      const range = formatLineRange(comment);
-      lines.push("");
-      lines.push(`- ${range}`);
-      lines.push(`  Selected text: ${truncateForReview(comment.selectedText.trim() || "(none)")}`);
-      lines.push(`  Comment: ${comment.comment.trim()}`);
-    }
-    lines.push("");
-  }
-
-  if (commentCount === 0) {
-    lines.push("No written review comments were found.");
-  }
-
-  return lines.join("\n");
-}
-
-function formatLineRange(comment: ReviewComment): string {
-  const side = comment.side ? `${comment.side}, ` : "";
-  if (comment.startLine === null || comment.endLine === null) return `${side}selected lines`;
-  if (comment.startLine === comment.endLine) return `${side}line ${comment.startLine}`;
-  return `${side}lines ${comment.startLine}-${comment.endLine}`;
-}
-
-function truncateForReview(value: string): string {
-  if (value.length <= 2000) return value;
-  return `${value.slice(0, 2000)}...`;
+  return reviewFormatter.format({ review, reviewPath });
 }

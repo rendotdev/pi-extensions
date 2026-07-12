@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "lgtm": {
+      "command": "node",
+      "args": ["./dist/cli.mjs", "mcp"],
+      "cwd": "."
+    }
+  }
+}
