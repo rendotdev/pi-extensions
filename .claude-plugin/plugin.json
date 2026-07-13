@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "lgtm",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Human approval for agent work, with code diff and Markdown review.",
   "author": {
     "name": "René-Pier Deshaies-Gélinas",
@@ -10,7 +10,11 @@
   "homepage": "https://github.com/rendotdev/lgtm#readme",
   "repository": "https://github.com/rendotdev/lgtm",
   "license": "MIT",
-  "keywords": ["ai-agents", "code-review", "human-in-the-loop"],
+  "keywords": [
+    "ai-agents",
+    "code-review",
+    "human-in-the-loop"
+  ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.claude.json"
 }
