@@ -580,7 +580,7 @@ async function resolveWebRoot() {
   const modulePath = fileURLToPath(import.meta.url);
   const candidates = [
     process.env.LGTM_WEB_ROOT,
-    resolve(modulePath, "..", "web"),
+    resolve(modulePath, "..", "..", "..", "interfaces", "web"),
     resolve(modulePath, "..", "..", "dist", "web"),
     resolve(modulePath, "..", "..", "..", "..", "dist", "web"),
   ].filter((candidate): candidate is string => Boolean(candidate));

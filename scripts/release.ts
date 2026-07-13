@@ -31,6 +31,7 @@ run("vp", ["test"]);
 run("vp", ["run", "package"]);
 run("npm", ["version", releaseType, "--no-git-tag-version", "--ignore-scripts"]);
 run("npm", ["run", "metadata:sync"]);
+run("vp", ["check", "--fix"]);
 
 const bumpedVersion = await readPackageVersion();
 if (bumpedVersion !== nextVersion) {
