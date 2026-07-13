@@ -10,9 +10,17 @@ import {
   stopReviews,
 } from "../../platform/review/review-platform.ts";
 import type { DiffReviewFileInput, ReviewPointer } from "../../domain/review/review.ts";
+import {
+  agentInstallPlanner,
+  isAgentInstallTarget,
+  type AgentInstallStep,
+  type AgentInstallTarget,
+} from "../../domain/install/agent-install.ts";
+import { agentInstaller } from "../../platform/install/agent-install-platform.ts";
 import { runMcpServer } from "../mcp/mcp.ts";
 
 const args = process.argv.slice(2);
+if (args[0] === "--") args.shift();
 const command = args.shift() ?? "help";
 const jsonOutput = takeFlag("--json");
 const cwd = resolve(takeOption("--cwd") ?? process.cwd());
@@ -109,11 +117,22 @@ Usage:
   lgtm finish [--cwd <path>] [--json]
   lgtm stop [--cwd <path>] [--json]
   lgtm mcp
+  lgtm install [--target <all|pi|claude|codex>] [--dry-run] [--json]
 
 Custom input:
   { "name": "Review name", "files": [{ "location": "file.ts", "oldContent": "", "newContent": "" }] }
 
 Document Markdown and custom JSON are read from stdin when no file is supplied.`);
+}
+
+function printInstallResult(target: AgentInstallTarget, steps: AgentInstallStep[]) {
+  if (jsonOutput) {
+    console.log(JSON.stringify({ target, steps }, null, 2));
+    return;
+  }
+  console.log(
+    `Installed LGTM for ${target}. Start a new agent session to load the plugin and skill.`,
+  );
 }
 
 async function main() {
@@ -126,6 +145,20 @@ async function main() {
     const appDir = takeOption("--app-dir");
     if (!appDir) throw new Error("serve requires --app-dir.");
     await serveReviewApp(appDir);
+    return;
+  }
+
+  if (command === "install") {
+    const target = takeOption("--target") ?? "all";
+    if (!isAgentInstallTarget(target)) {
+      throw new Error("install --target must be one of: all, pi, claude, codex.");
+    }
+    const plan = agentInstallPlanner.createPlan({ target });
+    if (takeFlag("--dry-run")) {
+      printInstallResult(target, plan);
+      return;
+    }
+    printInstallResult(target, await agentInstaller.install({ target }));
     return;
   }
 
