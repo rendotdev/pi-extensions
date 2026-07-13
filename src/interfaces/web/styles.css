@@ -3,7 +3,6 @@
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
 @import "@heroui/styles/css";
-@plugin "@tailwindcss/typography";
 @source "./main.tsx";
 
 .typeset-docs {

@@ -1121,7 +1121,7 @@ function DocumentReviewSurface(props: {
         <button
           type="button"
           data-document-comment-button=""
-          className="not-prose absolute left-[-2.25rem] top-1 z-[1] flex h-7 w-7 items-center justify-center rounded-[var(--vercel-radius)] border border-[var(--border)] bg-white text-[var(--muted)] opacity-0 transition-[border-color,color,opacity] after:absolute after:inset-y-0 after:left-full after:w-2 after:content-[''] duration-[var(--motion-duration)] ease-[var(--motion-ease)] hover:border-neutral-400 hover:text-[var(--foreground)] focus-visible:opacity-100"
+          className="not-typeset absolute left-[-2.25rem] top-1 z-[1] flex h-7 w-7 items-center justify-center rounded-[var(--vercel-radius)] border border-[var(--border)] bg-white text-[var(--muted)] opacity-0 transition-[border-color,color,opacity] after:absolute after:inset-y-0 after:left-full after:w-2 after:content-[''] duration-[var(--motion-duration)] ease-[var(--motion-ease)] hover:border-neutral-400 hover:text-[var(--foreground)] focus-visible:opacity-100"
           aria-label={`Comment on ${tag} block at ${startLine === endLine ? `line ${startLine}` : `lines ${startLine}-${endLine}`}`}
           title="Comment on this block"
           onClick={() => addBlockComment(blockId, startLine, endLine)}
@@ -1135,7 +1135,7 @@ function DocumentReviewSurface(props: {
         </button>
         {content}
         {annotations.map((comment) => (
-          <div key={comment.id} className="not-prose">
+          <div key={comment.id} className="not-typeset">
             <CommentEditor
               id={comment.id}
               value={comment.comment}
@@ -1295,7 +1295,7 @@ function DocumentReviewSurface(props: {
       <article
         ref={articleRef}
         onMouseUp={handleMouseUp}
-        className="prose prose-slate max-w-none selection:bg-[#0070f3] selection:text-white"
+        className="typeset typeset-docs max-w-none selection:bg-[#0070f3] selection:text-white"
       >
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
           {props.document.markdown}
