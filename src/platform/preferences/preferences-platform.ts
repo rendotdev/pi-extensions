@@ -1,15 +1,14 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { applyEdits, modify, parse, type ParseError } from "jsonc-parser";
-import {
-  lgtmPreferences,
-  type LgtmPreferences,
-} from "../../domain/preferences/preferences.ts";
+import { lgtmPreferences, type LgtmPreferences } from "../../domain/preferences/preferences.ts";
 
 export class LgtmPreferencesPlatformClass {
   public readonly path: string;
+  private readonly params: { cwd: string };
 
-  public constructor(private readonly params: { cwd: string }) {
+  public constructor(params: { cwd: string }) {
+    this.params = params;
     this.path = join(params.cwd, ".lgtm", "lgtm.jsonc");
   }
 

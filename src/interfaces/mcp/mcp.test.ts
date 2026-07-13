@@ -43,7 +43,6 @@ function dependencies(): McpRuntimeDependencies {
     finishReview: vi.fn(async () => ({ found: false as const })),
     openReview: vi.fn(async () => pointer),
     stopReview: vi.fn(async () => true),
-    stopReviews: vi.fn(async () => true),
     waitForReview: vi.fn(
       async () =>
         ({
@@ -72,10 +71,9 @@ describe("LGTM MCP tools", () => {
     expect(mcpTools.map((tool) => tool.name)).toEqual([
       "open_git_review",
       "open_worktree_review",
-      "open_custom_review",
+      "open_json_review",
       "open_document_review",
       "finish_review",
-      "stop_review",
     ]);
   });
 
@@ -109,13 +107,13 @@ describe("LGTM MCP tools", () => {
     expect(result).toEqual(expect.objectContaining({ status: "changes_requested" }));
   });
 
-  it("opens custom and document reviews without a host-specific adapter", async () => {
+  it("opens JSON and document reviews without a host-specific adapter", async () => {
     const runtime = dependencies();
     const handle = createMcpToolHandler(runtime);
     const signal = new AbortController().signal;
 
     await handle(
-      "open_custom_review",
+      "open_json_review",
       {
         cwd: "/tmp/project",
         files: [{ location: "new.ts", oldContent: "", newContent: "new" }],
@@ -146,7 +144,7 @@ describe("LGTM MCP tools", () => {
     );
   });
 
-  it("targets an explicit review when finishing or stopping", async () => {
+  it("targets an explicit review when finishing", async () => {
     const runtime = dependencies();
     const handle = createMcpToolHandler(runtime);
     const signal = new AbortController().signal;
@@ -156,17 +154,7 @@ describe("LGTM MCP tools", () => {
       { cwd: "/tmp/project", reviewPath: ".lgtm/review/review.json" },
       signal,
     );
-    await handle(
-      "stop_review",
-      { cwd: "/tmp/project", reviewPath: ".lgtm/review/review.json" },
-      signal,
-    );
-
     expect(runtime.finishReview).toHaveBeenCalledWith("/tmp/project", ".lgtm/review/review.json");
-    expect(runtime.stopReview).toHaveBeenCalledWith(
-      "/tmp/project",
-      "/tmp/project/.lgtm/review/review.json",
-    );
   });
 
   it("rejects an overlapping blocking review for the same project", async () => {
@@ -175,7 +163,7 @@ describe("LGTM MCP tools", () => {
     const handle = createMcpToolHandler(runtime);
     const controller = new AbortController();
     const firstReview = handle(
-      "open_custom_review",
+      "open_json_review",
       {
         cwd: "/tmp/project",
         files: [{ location: "first.ts", oldContent: "", newContent: "first" }],
@@ -187,7 +175,7 @@ describe("LGTM MCP tools", () => {
 
     await expect(
       handle(
-        "open_custom_review",
+        "open_json_review",
         {
           cwd: "/tmp/project",
           files: [{ location: "second.ts", oldContent: "", newContent: "second" }],
@@ -201,35 +189,33 @@ describe("LGTM MCP tools", () => {
     expect(runtime.openReview).toHaveBeenCalledOnce();
   });
 
-  it.each(["stop_review", "finish_review"] as const)(
-    "%s terminates a blocking review that is still open",
-    async (lifecycleTool) => {
-      const runtime = dependencies();
-      runtime.waitForReview = waitUntilAborted();
-      runtime.finishReview = vi.fn(async () => ({
-        found: true as const,
-        reviewPath: pointer.reviewPath,
-        review: { ...review, status: "open" as const },
-        stoppedServer: true,
-        formattedReview: "Review status: open",
-      }));
-      const handle = createMcpToolHandler(runtime);
-      const blockingReview = handle(
-        "open_custom_review",
-        {
-          cwd: "/tmp/project",
-          files: [{ location: "file.ts", oldContent: "", newContent: "new" }],
-        },
-        new AbortController().signal,
-      );
-      const blockingResult = expect(blockingReview).rejects.toThrow(`stopped by ${lifecycleTool}`);
-      await vi.waitFor(() => expect(runtime.waitForReview).toHaveBeenCalledOnce());
+  it("finish_review terminates a blocking review that is still open", async () => {
+    const lifecycleTool = "finish_review";
+    const runtime = dependencies();
+    runtime.waitForReview = waitUntilAborted();
+    runtime.finishReview = vi.fn(async () => ({
+      found: true as const,
+      reviewPath: pointer.reviewPath,
+      review: { ...review, status: "open" as const },
+      stoppedServer: true,
+      formattedReview: "Review status: open",
+    }));
+    const handle = createMcpToolHandler(runtime);
+    const blockingReview = handle(
+      "open_json_review",
+      {
+        cwd: "/tmp/project",
+        files: [{ location: "file.ts", oldContent: "", newContent: "new" }],
+      },
+      new AbortController().signal,
+    );
+    const blockingResult = expect(blockingReview).rejects.toThrow(`stopped by ${lifecycleTool}`);
+    await vi.waitFor(() => expect(runtime.waitForReview).toHaveBeenCalledOnce());
 
-      await handle(lifecycleTool, { cwd: "/tmp/project" }, new AbortController().signal);
+    await handle(lifecycleTool, { cwd: "/tmp/project" }, new AbortController().signal);
 
-      await blockingResult;
-    },
-  );
+    await blockingResult;
+  });
 });
 
 describe("LGTM MCP transport", () => {

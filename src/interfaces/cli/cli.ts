@@ -20,7 +20,8 @@ import {
 import { agentInstaller, agentUpdater } from "../../platform/install/agent-install-platform.ts";
 import { cliUpdater, type CliUpdateResult } from "../../platform/install/cli-update-platform.ts";
 import { runMcpServer } from "../mcp/mcp.ts";
-import { jsonReviewInputParser } from "./json-review-input.ts";
+import { JsonReviewInputParser } from "./json-review-input.ts";
+import { commandUiRenderer, renderCommandDetail } from "./command-ui.ts";
 
 const args = process.argv.slice(2);
 if (args[0] === "--") args.shift();
@@ -34,6 +35,7 @@ const jsonOutput = takeFlag("--json");
 const cwd = resolve(takeOption("--cwd") ?? process.cwd());
 const cancellation = new AbortController();
 let cancelling = false;
+let commandErrorRendered = false;
 
 async function cancel() {
   if (cancelling) return;
@@ -65,22 +67,20 @@ function takeOption(option: string) {
   return value;
 }
 
-function reviewOptions() {
+function reviewOptions(report: (label: string) => void) {
   return {
     cwd,
     signal: cancellation.signal,
-    onUpdate: jsonOutput ? undefined : (message: string) => console.error(message),
+    onUpdate: jsonOutput ? undefined : report,
   };
 }
 
-function printPointer(pointer: ReviewPointer) {
-  if (jsonOutput) {
-    console.log(JSON.stringify(pointer, null, 2));
-    return;
-  }
-  console.log(`LGTM review opened: ${pointer.name}`);
-  console.log(`URL: ${pointer.url}`);
-  console.log(`Review JSON: ${pointer.reviewPath}`);
+function formatPointer(pointer: ReviewPointer) {
+  return renderCommandDetail([
+    `LGTM review opened: ${pointer.name}`,
+    `URL: ${pointer.url}`,
+    `Review JSON: ${pointer.reviewPath}`,
+  ]);
 }
 
 async function readStdin() {
@@ -95,8 +95,8 @@ async function readInput(path: string | undefined) {
   return path ? await readFile(resolve(cwd, path), "utf8") : await readStdin();
 }
 
-function printHelp() {
-  console.log(`LGTM, human approval for agent work
+function helpText() {
+  return `LGTM, human approval for agent work
 
 Usage:
   lgtm [--name <name>] [--cwd <path>] [--json]
@@ -117,27 +117,43 @@ JSON review schema:
     ]
   }
 
-Bare lgtm reviews the current Git changes. Document Markdown and review JSON are read from stdin when no file is supplied.`);
+Bare lgtm reviews the current Git changes. Document Markdown and review JSON are read from stdin when no file is supplied.`;
 }
 
-function printIntegrationResult(params: {
+function formatIntegrationResult(params: {
   action: "setup" | "update";
   target: AgentInstallTarget;
   steps: AgentInstallStep[];
   skippedTargets?: Exclude<AgentInstallTarget, "all">[];
   cli?: CliUpdateResult;
 }) {
-  if (jsonOutput) {
-    console.log(JSON.stringify(params, null, 2));
-    return;
-  }
-  if (params.cli?.status === "updated") console.log("Updated the LGTM CLI.");
-  if (params.cli?.status === "skipped") console.log(`Skipped CLI update: ${params.cli.reason}`);
-  console.log(
+  const lines: string[] = [];
+  if (params.cli?.status === "updated") lines.push("Updated the LGTM CLI.");
+  if (params.cli?.status === "skipped") lines.push(`Skipped CLI update: ${params.cli.reason}`);
+  lines.push(
     `${params.action === "setup" ? "Set up" : "Updated"} LGTM integrations for ${params.target}. Start a new agent session to load the plugin and skill.`,
   );
   if (params.skippedTargets?.length) {
-    console.log(`Skipped uninstalled integrations: ${params.skippedTargets.join(", ")}.`);
+    lines.push(`Skipped uninstalled integrations: ${params.skippedTargets.join(", ")}.`);
+  }
+  return renderCommandDetail(lines);
+}
+
+async function runCommand<Result>(params: {
+  label: string;
+  execute: (report: (label: string) => void) => Promise<Result>;
+  renderSuccess: (result: Result) => string;
+}): Promise<Result> {
+  if (jsonOutput) {
+    const result = await params.execute(() => undefined);
+    console.log(JSON.stringify(result, null, 2));
+    return result;
+  }
+  try {
+    return await commandUiRenderer.run(params);
+  } catch (error) {
+    commandErrorRendered = true;
+    throw error;
   }
 }
 
@@ -161,13 +177,21 @@ async function main() {
     }
     const plan = agentInstallPlanner.createPlan({ target });
     if (takeFlag("--dry-run")) {
-      printIntegrationResult({ action: "setup", target, steps: plan });
+      await runCommand({
+        label: "Planning LGTM setup",
+        execute: async () => ({ action: "setup" as const, target, steps: plan }),
+        renderSuccess: formatIntegrationResult,
+      });
       return;
     }
-    printIntegrationResult({
-      action: "setup",
-      target,
-      steps: await agentInstaller.install({ target }),
+    await runCommand({
+      label: "Setting up LGTM integrations",
+      execute: async () => ({
+        action: "setup" as const,
+        target,
+        steps: await agentInstaller.install({ target }),
+      }),
+      renderSuccess: formatIntegrationResult,
     });
     return;
   }
@@ -179,27 +203,55 @@ async function main() {
     }
     const plan = agentUpdatePlanner.createPlan({ target });
     if (takeFlag("--dry-run")) {
-      printIntegrationResult({ action: "update", target, steps: plan, cli: cliUpdater.plan() });
+      await runCommand({
+        label: "Planning LGTM update",
+        execute: async () => ({
+          action: "update" as const,
+          target,
+          steps: plan,
+          cli: cliUpdater.plan(),
+        }),
+        renderSuccess: formatIntegrationResult,
+      });
       return;
     }
-    printIntegrationResult({
-      action: "update",
-      target,
-      cli: await cliUpdater.update(),
-      ...(await agentUpdater.update({ target })),
+    await runCommand({
+      label: "Updating LGTM integrations",
+      execute: async () => ({
+        action: "update" as const,
+        target,
+        cli: await cliUpdater.update(),
+        ...(await agentUpdater.update({ target })),
+      }),
+      renderSuccess: formatIntegrationResult,
     });
     return;
   }
 
   if (command === "help") {
-    printHelp();
+    if (jsonOutput) {
+      console.log(helpText());
+      return;
+    }
+    await runCommand({
+      label: "Showing LGTM help",
+      execute: async () => undefined,
+      renderSuccess: helpText,
+    });
     return;
   }
 
   if (command === "git") {
     const name = takeOption("--name") ?? "Git review";
-    const files = await collectGitReviewFiles(cwd);
-    printPointer(await openReview({ kind: "diff", name, files }, reviewOptions()));
+    await runCommand({
+      label: "Opening Git review",
+      execute: async (report) => {
+        report("Collecting Git changes");
+        const files = await collectGitReviewFiles(cwd);
+        return await openReview({ kind: "diff", name, files }, reviewOptions(report));
+      },
+      renderSuccess: formatPointer,
+    });
     return;
   }
 
@@ -207,60 +259,77 @@ async function main() {
     const worktree = args.shift();
     if (!worktree) throw new Error("worktree requires a path.");
     const name = takeOption("--name") ?? "Worktree review";
-    const files = await collectGitReviewFiles(resolve(cwd, worktree));
-    printPointer(await openReview({ kind: "diff", name, files }, reviewOptions()));
+    await runCommand({
+      label: "Opening worktree review",
+      execute: async (report) => {
+        report("Collecting worktree changes");
+        const files = await collectGitReviewFiles(resolve(cwd, worktree));
+        return await openReview({ kind: "diff", name, files }, reviewOptions(report));
+      },
+      renderSuccess: formatPointer,
+    });
     return;
   }
 
   if (command === "json" || command === "custom") {
     const positionalInput = args[0]?.startsWith("--") ? undefined : args.shift();
     const inputPath = takeOption("--input") ?? positionalInput;
-    const input = jsonReviewInputParser.parse({
-      value: JSON.parse(await readInput(inputPath)) as unknown,
+    await runCommand({
+      label: "Opening JSON review",
+      execute: async (report) => {
+        report("Reading review JSON");
+        const input = JsonReviewInputParser.parse({
+          value: JSON.parse(await readInput(inputPath)) as unknown,
+        });
+        const name = takeOption("--name") ?? input.name ?? "JSON review";
+        return await openReview({ kind: "diff", name, files: input.files }, reviewOptions(report));
+      },
+      renderSuccess: formatPointer,
     });
-    const name = takeOption("--name") ?? input.name ?? "JSON review";
-    printPointer(await openReview({ kind: "diff", name, files: input.files }, reviewOptions()));
     return;
   }
 
   if (command === "document") {
     const documentPath = args[0]?.startsWith("--") ? undefined : args.shift();
-    const markdown = await readInput(documentPath);
-    if (!markdown.trim()) throw new Error("Document review requires Markdown input.");
-    const name =
-      takeOption("--name") ?? (documentPath ? `Review ${documentPath}` : "Document review");
-    printPointer(
-      await openReview(
-        {
-          kind: "document",
-          name,
-          document: { markdown, location: documentPath },
-        },
-        reviewOptions(),
-      ),
-    );
+    await runCommand({
+      label: "Opening document review",
+      execute: async (report) => {
+        report("Reading Markdown document");
+        const markdown = await readInput(documentPath);
+        if (!markdown.trim()) throw new Error("Document review requires Markdown input.");
+        const name =
+          takeOption("--name") ?? (documentPath ? `Review ${documentPath}` : "Document review");
+        return await openReview(
+          { kind: "document", name, document: { markdown, location: documentPath } },
+          reviewOptions(report),
+        );
+      },
+      renderSuccess: formatPointer,
+    });
     return;
   }
 
   if (command === "finish") {
-    const result = await finishReview(cwd);
-    if (jsonOutput) console.log(JSON.stringify(result, null, 2));
-    else if (!result.found) console.log("No LGTM review found.");
-    else
-      console.log(
-        `${result.formattedReview}\n\nServer stopped: ${result.stoppedServer ? "yes" : "no"}`,
-      );
+    await runCommand({
+      label: "Finishing LGTM review",
+      execute: async () => await finishReview(cwd),
+      renderSuccess: (result) =>
+        !result.found
+          ? "No LGTM review found."
+          : `${result.formattedReview}\n\nServer stopped: ${result.stoppedServer ? "yes" : "no"}`,
+    });
     return;
   }
 
   if (command === "stop") {
-    const result = await finishReview(cwd);
-    if (jsonOutput) console.log(JSON.stringify(result, null, 2));
-    else if (!result.found) console.log("No LGTM review found.");
-    else
-      console.log(
-        `${result.formattedReview}\n\nServer stopped: ${result.stoppedServer ? "yes" : "no"}`,
-      );
+    await runCommand({
+      label: "Stopping LGTM review",
+      execute: async () => await finishReview(cwd),
+      renderSuccess: (result) =>
+        !result.found
+          ? "No LGTM review found."
+          : `${result.formattedReview}\n\nServer stopped: ${result.stoppedServer ? "yes" : "no"}`,
+    });
     return;
   }
 
@@ -268,6 +337,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
+  if (!commandErrorRendered) console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 });

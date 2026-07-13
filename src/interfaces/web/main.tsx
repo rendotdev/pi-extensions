@@ -30,6 +30,13 @@ import {
 import { useForm } from "@tanstack/react-form";
 import { formatForDisplay, useHotkey } from "@tanstack/react-hotkeys";
 import { useAsyncDebouncer } from "@tanstack/react-pacer/async-debouncer";
+import {
+  QueryClient,
+  QueryClientProvider,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { parseDiffFromFile, type DiffLineAnnotation, type FileDiffMetadata } from "@pierre/diffs";
 import { AnimatePresence, motion } from "motion/react";
@@ -42,8 +49,11 @@ import {
 import DiffsWorker from "@pierre/diffs/worker/worker.js?worker";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import type { DiffStyle, LgtmPreferences } from "../../domain/preferences/preferences.ts";
 import { CommentDraft } from "./comment-draft.ts";
+import { preferencesApi } from "./preferences-api.ts";
 import { ReviewHandoff } from "./review-handoff.ts";
+import { ReviewWindowTitle } from "./window-title.ts";
 
 type ReviewSourceFile = {
   id: string;
@@ -107,7 +117,6 @@ type DocumentComment = {
 };
 
 type ReviewStatus = "open" | "approved" | "changes_requested" | "canceled";
-type DiffStyle = "unified" | "split";
 
 type ReviewJson = {
   version: 2;
@@ -289,6 +298,7 @@ function getDefaultCollapsedFileIds(state: AppState) {
 }
 
 function App() {
+  const queryClient = useQueryClient();
   const [state, setState] = useState<AppState | null>(null);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [copiedReviewPath, setCopiedReviewPath] = useState(false);
@@ -297,10 +307,46 @@ function App() {
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [recoveryStatus, setRecoveryStatus] = useState<string | null>(null);
   const [collapsedFileIds, setCollapsedFileIds] = useState<Set<string>>(() => new Set());
-  const [diffStyle, setDiffStyle] = useState<DiffStyle>("unified");
   const reviewHeaderRef = useRef<HTMLElement | null>(null);
   const deleteAllTriggerRef = useRef<HTMLButtonElement | null>(null);
   const lastSavedSignature = useRef<string | null>(null);
+  const preferencesQuery = useQuery({
+    queryKey: ["preferences"],
+    queryFn: () => preferencesApi.get(),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  const preferencesMutation = useMutation({
+    mutationFn: (preferences: LgtmPreferences) => preferencesApi.update({ preferences }),
+    onMutate: async (preferences) => {
+      await queryClient.cancelQueries({ queryKey: ["preferences"] });
+      const previousPreferences = queryClient.getQueryData<LgtmPreferences>(["preferences"]);
+      queryClient.setQueryData(["preferences"], preferences);
+      return { previousPreferences };
+    },
+    onError: (error, _preferences, context) => {
+      queryClient.setQueryData(
+        ["preferences"],
+        context?.previousPreferences ?? { diffStyle: "unified" },
+      );
+      toast.danger("Unable to save LGTM preferences", {
+        description: errorDescription(error, "Check that the review server is still running."),
+      });
+    },
+    onSuccess: (preferences) => {
+      queryClient.setQueryData(["preferences"], preferences);
+    },
+  });
+  const diffStyle = preferencesQuery.data?.diffStyle ?? "unified";
+
+  useEffect(() => {
+    if (!preferencesQuery.error) return;
+    toast.danger("Unable to load LGTM preferences", {
+      description: errorDescription(
+        preferencesQuery.error,
+        "The review will use the unified diff layout.",
+      ),
+    });
+  }, [preferencesQuery.error]);
 
   useEffect(() => {
     let cancelled = false;
@@ -308,6 +354,7 @@ function App() {
       .then((nextState) => {
         if (cancelled) return;
         lastSavedSignature.current = meaningfulReviewSignature(nextState.review);
+        document.title = ReviewWindowTitle.format({ cwd: nextState.payload.cwd });
         setCollapsedFileIds(getDefaultCollapsedFileIds(nextState));
         setState(nextState);
       })
@@ -681,6 +728,11 @@ function App() {
     if (!isOpen) window.requestAnimationFrame(() => deleteAllTriggerRef.current?.focus());
   }
 
+  function updateDiffStyle(nextDiffStyle: DiffStyle) {
+    if (nextDiffStyle === diffStyle || preferencesMutation.isPending) return;
+    preferencesMutation.mutate({ diffStyle: nextDiffStyle });
+  }
+
   return (
     <div className="min-h-screen">
       <header
@@ -786,10 +838,11 @@ function App() {
               {payload.kind === "diff" ? (
                 <ButtonGroup size="sm" aria-label="Diff layout">
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     className={diffStyle === "unified" ? "bg-slate-100" : undefined}
                     aria-pressed={diffStyle === "unified"}
-                    onPress={() => setDiffStyle("unified")}
+                    isDisabled={preferencesMutation.isPending}
+                    onPress={() => updateDiffStyle("unified")}
                   >
                     Unified
                   </Button>
@@ -797,7 +850,8 @@ function App() {
                     variant="outline"
                     className={diffStyle === "split" ? "bg-slate-100" : undefined}
                     aria-pressed={diffStyle === "split"}
-                    onPress={() => setDiffStyle("split")}
+                    isDisabled={preferencesMutation.isPending}
+                    onPress={() => updateDiffStyle("split")}
                   >
                     Side by side
                   </Button>
@@ -1627,7 +1681,7 @@ const ReviewFileDiff = React.memo(function ReviewFileDiff(props: ReviewFileDiffP
                 <div className="flex items-center gap-2">
                   <Button
                     size="sm"
-                    variant="outline"
+                    variant="ghost"
                     className="font-normal"
                     onClick={copyPath}
                     aria-label="Copy file path"
@@ -1803,20 +1857,24 @@ function resizeTextarea(textarea: HTMLTextAreaElement) {
   textarea.style.height = Math.max(44, textarea.scrollHeight) + "px";
 }
 
+const queryClient = new QueryClient();
+
 createRoot(document.getElementById("root")!).render(
   <>
     <Toast.Provider placement="bottom end" />
-    <WorkerPoolContextProvider
-      poolOptions={{
-        poolSize: Math.min(4, navigator.hardwareConcurrency || 2),
-        workerFactory: () => new DiffsWorker(),
-      }}
-      highlighterOptions={{
-        lineDiffType: "word",
-        theme: "github-light",
-      }}
-    >
-      <App />
-    </WorkerPoolContextProvider>
+    <QueryClientProvider client={queryClient}>
+      <WorkerPoolContextProvider
+        poolOptions={{
+          poolSize: Math.min(4, navigator.hardwareConcurrency || 2),
+          workerFactory: () => new DiffsWorker(),
+        }}
+        highlighterOptions={{
+          lineDiffType: "word",
+          theme: "github-light",
+        }}
+      >
+        <App />
+      </WorkerPoolContextProvider>
+    </QueryClientProvider>
   </>,
 );

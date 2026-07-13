@@ -105,6 +105,7 @@ export default defineConfig(async ({ command, mode }): Promise<ViteUserConfig> =
     test: {
       include: [
         "./**/*.test.ts",
+        "../cli/**/*.test.ts",
         "../mcp/**/*.test.ts",
         "../pi/**/*.test.ts",
         "../../domain/**/*.test.ts",
@@ -117,6 +118,7 @@ export default defineConfig(async ({ command, mode }): Promise<ViteUserConfig> =
       format: ["esm"],
       outDir: "dist",
       clean: false,
+      deps: { neverBundle: ["ink", "jsonc-parser", "react"] },
     },
     run: {
       tasks: {

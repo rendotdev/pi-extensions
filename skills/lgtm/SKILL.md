@@ -13,10 +13,9 @@ Prefer the bundled MCP tools when they are available. They keep the tool call op
 
 - `open_git_review`
 - `open_worktree_review`
-- `open_custom_review`
+- `open_json_review`
 - `open_document_review`
 - `finish_review`
-- `stop_review`
 
 Use the matching source-specific open tool after the work is ready and validated. Do not open a duplicate while the human is reviewing.
 
@@ -25,16 +24,16 @@ When MCP tools are unavailable, run `lgtm --help` and use the equivalent CLI com
 Use one command that matches the work being reviewed:
 
 ```bash
-lgtm git --name "Review current changes"
+lgtm --name "Review current changes"
 lgtm worktree ../feature-worktree --name "Review feature worktree"
 lgtm document PLAN.md --name "Review implementation plan"
-lgtm custom --input review.json --name "Review generated changes"
+lgtm json review.json --name "Review generated changes"
 ```
 
 - `git` reviews staged, unstaged, and untracked text changes in the selected checkout.
 - `worktree` reviews Git changes in the supplied worktree path.
 - `document` reviews a Markdown file. With no file argument, it reads Markdown from stdin.
-- `custom` reads explicit before-and-after file content from JSON. Run `lgtm --help` for the current JSON shape.
+- `json` reads explicit before-and-after file content. Each file requires `location`, `oldContent`, and `newContent` strings. Run `lgtm --help` for the complete schema.
 
 Add `--cwd <path>` when the review belongs to a different workspace. Add `--json` when another program needs the command result.
 
@@ -49,4 +48,4 @@ Add `--cwd <path>` when the review belongs to a different workspace. Add `--json
    - `PTAL: <path>` points to the saved `review.json`. Read that exact file, apply every actionable comment, validate the revision, and reopen when another approval is required.
    - Cancel is not approval. Preserve the work and wait when continuing would require approval.
 
-Use `lgtm finish --cwd <path>` only to recover the latest result when its automatic handoff is missing. Use `lgtm stop --cwd <path>` only when the user asks to stop the review. Never stop an active review as part of unrelated development checks.
+Use `lgtm finish --cwd <path>` to recover the latest result and stop its server when the automatic handoff is missing or the user asks to stop the review. Never finish an active review as part of unrelated development checks.

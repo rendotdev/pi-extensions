@@ -20,21 +20,39 @@ lgtm setup
 Review the current Git changes:
 
 ```bash
-lgtm git
+lgtm
 ```
 
-LGTM opens the review in your browser. Switch between **Unified** and **Side by side** diff layouts, choose **LGTM** to approve, **Send comments** to return your feedback, or **Cancel** to stop. The agent gets the result and continues from there.
+`lgtm git` is the explicit form of the same command.
+
+LGTM opens the review in your browser. Switch between **Unified** and **Side by side** diff layouts, choose **LGTM** to approve, **Send comments** to return your feedback, or **Cancel** to stop. LGTM saves your layout preference in `.lgtm/lgtm.jsonc` at the project root. The agent gets the result and continues from there.
 
 Other useful commands:
 
 ```bash
 lgtm worktree ../feature-worktree
 lgtm document PLAN.md
-lgtm custom --input review.json
+lgtm json review.json
 lgtm finish
-lgtm stop
 lgtm update
 ```
+
+JSON reviews use explicit before-and-after file content:
+
+```json
+{
+  "name": "Review generated changes",
+  "files": [
+    {
+      "location": "src/example.ts",
+      "oldContent": "export const answer = 41;",
+      "newContent": "export const answer = 42;"
+    }
+  ]
+}
+```
+
+`lgtm finish` reads the latest review result and stops its local server.
 
 `lgtm update` updates the CLI and every installed agent integration. Add `--json` for machine-readable output, `--cwd <path>` to choose another workspace, or `--dry-run` to preview install and update commands.
 
@@ -84,7 +102,7 @@ vp dev
 vp check
 vp test
 vp run package
-vp run lgtm -- git
+vp run lgtm
 ```
 
 `vp dev` starts the browser app with hot reload and uses the current workspace as its temporary review API. Set `LGTM_DEV_CWD=/path/to/repo` to review another workspace.

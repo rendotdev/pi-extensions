@@ -1,1 +1,1 @@
-- Use `vp run lgtm -- git` to test the current LGTM source after making changes.
+- Use `vp run lgtm` to test the current LGTM source after making changes.

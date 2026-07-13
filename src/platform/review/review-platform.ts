@@ -452,11 +452,7 @@ export async function serveReviewApp(appDirInput: string): Promise<void> {
             error: error instanceof Error ? error.message : String(error),
           });
         }
-        return sendJson(
-          response,
-          200,
-          await preferencesPlatform.write({ preferences }),
-        );
+        return sendJson(response, 200, await preferencesPlatform.write({ preferences }));
       }
 
       if (url.pathname === "/api/finish" && request.method === "POST") {

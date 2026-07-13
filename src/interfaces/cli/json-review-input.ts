@@ -45,4 +45,4 @@ export class JsonReviewInputParserClass {
   }
 }
 
-export const jsonReviewInputParser = new JsonReviewInputParserClass();
+export const JsonReviewInputParser = new JsonReviewInputParserClass();

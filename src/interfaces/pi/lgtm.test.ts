@@ -45,7 +45,7 @@ describe("LgtmPiExtensionClass", () => {
     expect(tools.map((tool) => tool.name)).toEqual([
       "lgtm-open-git-review",
       "lgtm-open-worktree-review",
-      "lgtm-open-custom-review",
+      "lgtm-open-json-review",
       "lgtm-open-document-review",
       "lgtm-finish-review",
     ]);

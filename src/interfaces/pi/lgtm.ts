@@ -34,7 +34,7 @@ export class LgtmPiExtensionClass {
   public register(pi: ExtensionAPI) {
     pi.registerTool(this.createOpenGitReviewTool(pi));
     pi.registerTool(this.createOpenWorktreeReviewTool(pi));
-    pi.registerTool(this.createOpenCustomReviewTool(pi));
+    pi.registerTool(this.createOpenJsonReviewTool(pi));
     pi.registerTool(this.createOpenDocumentReviewTool(pi));
     pi.registerTool(this.createFinishReviewTool());
 
@@ -163,16 +163,16 @@ export class LgtmPiExtensionClass {
     });
   }
 
-  private createOpenCustomReviewTool(pi: ExtensionAPI) {
+  private createOpenJsonReviewTool(pi: ExtensionAPI) {
     return defineTool({
-      name: "lgtm-open-custom-review",
-      label: "Open Custom Review",
+      name: "lgtm-open-json-review",
+      label: "Open JSON Review",
       description:
-        "Open an LGTM browser review from explicitly supplied original and updated file contents.",
+        "Open an LGTM browser review from files with location, oldContent, and newContent strings.",
       promptSnippet:
-        "lgtm-open-custom-review: Present explicit before-and-after file content for human review.",
+        "lgtm-open-json-review: Present explicit before-and-after file content for human review.",
       promptGuidelines: [
-        "Use lgtm-open-custom-review for reviewable content that is not represented by the current checkout or another worktree.",
+        "Use lgtm-open-json-review for reviewable content that is not represented by the current checkout or another worktree. Every file requires location, oldContent, and newContent strings.",
       ],
       executionMode: "sequential",
       parameters: Type.Object({

@@ -5,7 +5,6 @@ import {
   finishReview,
   openReview,
   stopReview,
-  stopReviews,
   waitForReview,
   type OpenReviewOptions,
 } from "../../platform/review/review-platform.ts";
@@ -38,7 +37,6 @@ export type McpRuntimeDependencies = {
   finishReview: typeof finishReview;
   openReview: typeof openReview;
   stopReview: typeof stopReview;
-  stopReviews: typeof stopReviews;
   waitForReview: typeof waitForReview;
 };
 
@@ -47,7 +45,6 @@ const defaultDependencies: McpRuntimeDependencies = {
   finishReview,
   openReview,
   stopReview,
-  stopReviews,
   waitForReview,
 };
 
@@ -85,8 +82,9 @@ export const mcpTools: McpTool[] = [
     },
   },
   {
-    name: "open_custom_review",
-    description: "Open supplied before-and-after files for human review and wait for a decision.",
+    name: "open_json_review",
+    description:
+      "Open explicitly supplied before-and-after file content for human review and wait for a decision. Each file requires location, oldContent, and newContent strings.",
     inputSchema: {
       type: "object",
       properties: {
@@ -136,18 +134,6 @@ export const mcpTools: McpTool[] = [
       additionalProperties: false,
     },
   },
-  {
-    name: "stop_review",
-    description: "Stop the current or specified local review server without changing its decision.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        cwd: commonProperties.cwd,
-        reviewPath: { type: "string", description: "Optional review.json path." },
-      },
-      additionalProperties: false,
-    },
-  },
 ];
 
 function optionalString(argumentsValue: JsonObject, name: string) {
@@ -165,7 +151,7 @@ function requiredString(argumentsValue: JsonObject, name: string) {
   return value;
 }
 
-function customFiles(value: unknown): DiffReviewFileInput[] {
+function jsonReviewFiles(value: unknown): DiffReviewFileInput[] {
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error("files must be a non-empty array.");
   }
@@ -275,12 +261,12 @@ export function createMcpToolHandler(dependencies: McpRuntimeDependencies = defa
       );
     }
 
-    if (name === "open_custom_review") {
+    if (name === "open_json_review") {
       return await openBlockingReview(
         {
           kind: "diff",
-          name: reviewName ?? "Custom review",
-          files: customFiles(args.files),
+          name: reviewName ?? "JSON review",
+          files: jsonReviewFiles(args.files),
         },
         cwd,
         signal,
@@ -308,16 +294,6 @@ export function createMcpToolHandler(dependencies: McpRuntimeDependencies = defa
         abortActiveOpen(cwd, result.reviewPath, "Review stopped by finish_review.");
       }
       return result;
-    }
-
-    if (name === "stop_review") {
-      const reviewPath = optionalString(args, "reviewPath");
-      const resolvedReviewPath = reviewPath ? resolve(cwd, reviewPath) : undefined;
-      const stopped = reviewPath
-        ? await dependencies.stopReview(cwd, resolvedReviewPath as string)
-        : await dependencies.stopReviews(cwd);
-      abortActiveOpen(cwd, resolvedReviewPath, "Review stopped by stop_review.");
-      return { stopped };
     }
 
     throw new Error(`Unknown LGTM tool: ${name}`);

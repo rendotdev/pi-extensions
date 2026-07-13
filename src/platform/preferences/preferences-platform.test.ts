@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -35,7 +35,7 @@ describe("LgtmPreferencesPlatformClass", () => {
 
   it("preserves comments and unrelated config keys", async () => {
     const { cwd, platform } = await makePlatform();
-    await (await import("node:fs/promises")).mkdir(join(cwd, ".lgtm"), { recursive: true });
+    await mkdir(join(cwd, ".lgtm"), { recursive: true });
     await writeFile(
       platform.path,
       '{\n  // Keep this note.\n  "futurePreference": true,\n}\n',
