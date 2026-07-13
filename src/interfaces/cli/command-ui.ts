@@ -1,33 +1,15 @@
-import { Text, render } from "ink";
-import { createElement, useEffect, useState } from "react";
 import { DomainClass } from "../../domain/domain-class.ts";
 
 const brailleFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const clearLine = "\r\u001B[2K";
 
-type CommandUiState = "loading" | "success" | "error";
+type CommandUiTimer = ReturnType<typeof setInterval>;
 type CommandUiRendererParams = {};
-type CommandUiRendererDeps = {};
-
-function CommandUi(props: { state: CommandUiState; label: string; detail?: string }) {
-  const [frame, setFrame] = useState(0);
-
-  useEffect(() => {
-    if (props.state !== "loading") return;
-    const interval = setInterval(() => {
-      setFrame((currentFrame) => (currentFrame + 1) % brailleFrames.length);
-    }, 80);
-    return () => clearInterval(interval);
-  }, [props.state]);
-
-  const symbol =
-    props.state === "loading" ? brailleFrames[frame] : props.state === "success" ? "✔" : "✖";
-  const color = props.state === "success" ? "green" : props.state === "error" ? "red" : "cyan";
-  return createElement(
-    Text,
-    { color },
-    `${symbol} ${props.label}${props.detail ? `\n${props.detail}` : ""}`,
-  );
-}
+type CommandUiRendererDeps = {
+  stdout: Pick<NodeJS.WriteStream, "isTTY" | "write">;
+  setInterval: (callback: () => void, milliseconds: number) => CommandUiTimer;
+  clearInterval: (timer: CommandUiTimer) => void;
+};
 
 export class CommandUiRendererClass extends DomainClass<
   CommandUiRendererParams,
@@ -38,40 +20,46 @@ export class CommandUiRendererClass extends DomainClass<
     execute: (report: (label: string) => void) => Promise<Result>;
     renderSuccess: (result: Result) => string;
   }): Promise<Result> {
-    if (!process.stdout.isTTY) {
+    if (!this.deps.stdout.isTTY) {
       const result = await params.execute(() => undefined);
-      console.log(`✔ ${params.label}\n${params.renderSuccess(result)}`);
+      this.deps.stdout.write(`✔ ${params.label}\n${params.renderSuccess(result)}\n`);
       return result;
     }
-    const instance = render(createElement(CommandUi, { state: "loading", label: params.label }), {
-      patchConsole: false,
-    });
-    const report = (label: string) => {
-      instance.rerender(createElement(CommandUi, { state: "loading", label }));
+
+    let frame = 0;
+    let label = params.label;
+    const renderLoading = () => {
+      this.renderLine({ color: 36, content: `${brailleFrames[frame]} ${label}` });
     };
+    const report = (nextLabel: string) => {
+      label = nextLabel;
+      renderLoading();
+    };
+
+    renderLoading();
+    const timer = this.deps.setInterval(() => {
+      frame = (frame + 1) % brailleFrames.length;
+      renderLoading();
+    }, 80);
 
     try {
       const result = await params.execute(report);
-      instance.rerender(
-        createElement(CommandUi, {
-          state: "success",
-          label: params.label,
-          detail: params.renderSuccess(result),
-        }),
-      );
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      instance.unmount();
+      this.deps.clearInterval(timer);
+      this.renderResult({
+        color: 32,
+        symbol: "✔",
+        label: params.label,
+        detail: params.renderSuccess(result),
+      });
       return result;
     } catch (error) {
-      instance.rerender(
-        createElement(CommandUi, {
-          state: "error",
-          label: params.label,
-          detail: error instanceof Error ? error.message : String(error),
-        }),
-      );
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      instance.unmount();
+      this.deps.clearInterval(timer);
+      this.renderResult({
+        color: 31,
+        symbol: "✖",
+        label: params.label,
+        detail: error instanceof Error ? error.message : String(error),
+      });
       throw error;
     }
   }
@@ -79,6 +67,31 @@ export class CommandUiRendererClass extends DomainClass<
   public formatDetail(params: { lines: string[] }): string {
     return params.lines.join("\n");
   }
+
+  public formatChecklist(params: { lines: string[] }): string {
+    return this.formatDetail({ lines: params.lines.map((line) => `✔ ${line}`) });
+  }
+
+  private renderLine(params: { color: number; content: string }): void {
+    this.deps.stdout.write(`${clearLine}\u001B[${params.color}m${params.content}\u001B[39m`);
+  }
+
+  private renderResult(params: {
+    color: number;
+    symbol: string;
+    label: string;
+    detail: string;
+  }): void {
+    this.renderLine({ color: params.color, content: `${params.symbol} ${params.label}` });
+    this.deps.stdout.write(`\n${params.detail}\n`);
+  }
 }
 
-export const CommandUiRenderer = new CommandUiRendererClass({}, {});
+export const CommandUiRenderer = new CommandUiRendererClass(
+  {},
+  {
+    stdout: process.stdout,
+    setInterval: globalThis.setInterval,
+    clearInterval: globalThis.clearInterval,
+  },
+);

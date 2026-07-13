@@ -137,7 +137,7 @@ function formatIntegrationResult(params: {
   if (params.skippedTargets?.length) {
     lines.push(`Skipped uninstalled integrations: ${params.skippedTargets.join(", ")}.`);
   }
-  return CommandUiRenderer.formatDetail({ lines });
+  return CommandUiRenderer.formatChecklist({ lines });
 }
 
 async function runCommand<Result>(params: {

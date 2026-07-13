@@ -1,5 +1,27 @@
+import { spawn } from "node:child_process";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { CliUpdaterClass } from "./cli-update-platform.ts";
+import { CliUpdateCommandRunnerClass, CliUpdaterClass } from "./cli-update-platform.ts";
+
+describe("CliUpdateCommandRunnerClass", () => {
+  it("captures successful command output instead of writing through the active terminal", async () => {
+    const runner = new CliUpdateCommandRunnerClass({}, { spawn });
+
+    await expect(
+      runner.run({ command: process.execPath, args: ["--eval", 'console.log("npm output")'] }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("includes captured command output when an update fails", async () => {
+    const runner = new CliUpdateCommandRunnerClass({}, { spawn });
+
+    await expect(
+      runner.run({
+        command: process.execPath,
+        args: ["--eval", 'console.error("npm failed"); process.exit(2)'],
+      }),
+    ).rejects.toThrow(`exited with code 2.\nnpm failed`);
+  });
+});
 
 describe("CliUpdaterClass", () => {
   it("updates through the npm executable belonging to the active global installation", async () => {

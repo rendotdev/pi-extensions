@@ -18,6 +18,39 @@ type CliUpdaterDependencies = {
   runCommand: (step: CliUpdateStep) => Promise<void>;
 };
 
+type CliUpdateCommandRunnerDependencies = {
+  spawn: typeof spawn;
+};
+
+export class CliUpdateCommandRunnerClass extends DomainClass<
+  {},
+  CliUpdateCommandRunnerDependencies
+> {
+  public async run(params: CliUpdateStep): Promise<void> {
+    await new Promise<void>((resolvePromise, reject) => {
+      const child = this.deps.spawn(params.command, params.args, {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const output: Buffer[] = [];
+      child.stdout.on("data", (chunk: Buffer | string) => output.push(Buffer.from(chunk)));
+      child.stderr.on("data", (chunk: Buffer | string) => output.push(Buffer.from(chunk)));
+      child.once("error", reject);
+      child.once("exit", (code, signal) => {
+        if (code === 0) {
+          resolvePromise();
+          return;
+        }
+        const detail = Buffer.concat(output).toString("utf8").trim();
+        reject(
+          new Error(
+            `${params.command} exited with ${signal ?? `code ${code ?? "unknown"}`}.${detail ? `\n${detail}` : ""}`,
+          ),
+        );
+      });
+    });
+  }
+}
+
 export class CliUpdaterClass extends DomainClass<{ packageRoot: string }, CliUpdaterDependencies> {
   private readonly packageRoot: string;
 
@@ -81,19 +114,9 @@ function findPackageRoot(moduleUrl: string): string {
   throw new Error("Could not locate the LGTM package root.");
 }
 
-async function runCommand(step: CliUpdateStep): Promise<void> {
-  await new Promise<void>((resolvePromise, reject) => {
-    const child = spawn(step.command, step.args, { stdio: "inherit" });
-    child.once("error", reject);
-    child.once("exit", (code, signal) => {
-      if (code === 0) resolvePromise();
-      else
-        reject(new Error(`${step.command} exited with ${signal ?? `code ${code ?? "unknown"}`}.`));
-    });
-  });
-}
+const cliUpdateCommandRunner = new CliUpdateCommandRunnerClass({}, { spawn });
 
 export const cliUpdater = new CliUpdaterClass(
   { packageRoot: findPackageRoot(import.meta.url) },
-  { executableExists: existsSync, runCommand },
+  { executableExists: existsSync, runCommand: (step) => cliUpdateCommandRunner.run(step) },
 );
