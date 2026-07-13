@@ -2,6 +2,7 @@ import { defineConfig, type ViteUserConfig } from "vite-plus";
 import type { Plugin } from "@voidzero-dev/vite-plus-core";
 import tailwindcss from "@tailwindcss/vite";
 import { resolve } from "node:path";
+import { DomainClass } from "./src/domain/domain-class.ts";
 import type { ReviewPointer } from "./src/domain/review/review.ts";
 import {
   collectGitReviewFiles,
@@ -15,14 +16,12 @@ type LgtmDevEnvironmentDependencies = {
   stopReview: typeof stopReview;
 };
 
-export class LgtmDevEnvironmentClass {
+export class LgtmDevEnvironmentClass extends DomainClass<
+  { cwd: string; sessionId: string },
+  LgtmDevEnvironmentDependencies
+> {
   private review: ReviewPointer | undefined;
   private stopPromise: Promise<boolean> | undefined;
-
-  public constructor(
-    private readonly params: { cwd: string; sessionId: string },
-    private readonly deps: LgtmDevEnvironmentDependencies,
-  ) {}
 
   public async start() {
     const files = await this.deps.collectGitReviewFiles(this.params.cwd);

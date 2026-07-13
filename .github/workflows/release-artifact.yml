@@ -46,11 +46,11 @@ jobs:
       - name: Check formatting, lint, and types
         run: vp check
 
-      - name: Run tests
-        run: vp test
-
       - name: Build package
         run: vp run package
+
+      - name: Run tests
+        run: vp test
 
       - name: Check plugin metadata
         if: ${{ hashFiles('scripts/sync-plugin-metadata.ts') != '' }}

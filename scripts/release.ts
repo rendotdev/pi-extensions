@@ -27,8 +27,8 @@ assertCleanWorktree();
 assertTagDoesNotExist(tag);
 
 run("vp", ["check"]);
-run("vp", ["test"]);
 run("vp", ["run", "package"]);
+run("vp", ["test"]);
 run("npm", ["version", releaseType, "--no-git-tag-version", "--ignore-scripts"]);
 run("npm", ["run", "metadata:sync"]);
 run("vp", ["check", "--fix"]);
