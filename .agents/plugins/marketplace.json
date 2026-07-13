@@ -9,7 +9,7 @@
       "source": {
         "source": "npm",
         "package": "@rendotdev/lgtm",
-        "version": "0.1.5"
+        "version": "0.1.6"
       },
       "policy": {
         "installation": "AVAILABLE",
