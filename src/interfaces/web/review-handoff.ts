@@ -19,13 +19,7 @@ type RecoverableReview = {
 
 export class ReviewHandoffClass {
   public recoveryText(review: RecoverableReview) {
-    const lines = [
-      `PTAL: ${review.reviewPath}`,
-      "",
-      "LGTM could not save or finish the local review. These comments were recovered from the browser:",
-      "",
-      `# ${review.name}`,
-    ];
+    const lines = [`PTAL: ${review.reviewPath}`, "", `# ${review.name}`];
 
     if (review.kind === "document") {
       for (const comment of review.documentComments) {

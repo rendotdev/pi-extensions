@@ -1,7 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { unlinkSync } from "node:fs";
-import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, resolve, sep } from "node:path";
 import process from "node:process";
@@ -37,16 +36,72 @@ type ReviewServerState = ReviewServerInfo & {
   startedAt: string;
 };
 
-const lastReviewByCwd = new Map<string, ReviewPointer>();
-const activeReviewServersByCwd = new Map<string, ReviewServerState>();
+class ReviewIdentifierClass {
+  constructor(params: Record<string, never>, deps: Record<string, never>) {
+    void params;
+    void deps;
+  }
+
+  public sanitizePathSegment(params: { value: string }): string {
+    return params.value.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 160) || randomUUID();
+  }
+}
+
+class ReviewServerLifecycleClass {
+  private readonly deps: {
+    activeReviewServersByPath: Map<string, ReviewServerState>;
+    readReviewServerPid: (appDir: string) => Promise<number | undefined>;
+    readReviewServerState: (appDir: string) => Promise<ReviewServerState | undefined>;
+    stopReviewServerState: (state: ReviewServerState, reviewPath?: string) => Promise<boolean>;
+  };
+
+  constructor(
+    params: Record<string, never>,
+    deps: {
+      activeReviewServersByPath: Map<string, ReviewServerState>;
+      readReviewServerPid: (appDir: string) => Promise<number | undefined>;
+      readReviewServerState: (appDir: string) => Promise<ReviewServerState | undefined>;
+      stopReviewServerState: (state: ReviewServerState, reviewPath?: string) => Promise<boolean>;
+    },
+  ) {
+    void params;
+    this.deps = deps;
+  }
+
+  public async stopForReview(params: { review: ReviewJson; reviewPath: string }): Promise<boolean> {
+    const appDir = params.review.appDir || resolve(params.reviewPath, "..");
+    const knownState =
+      this.deps.activeReviewServersByPath.get(params.reviewPath) ??
+      (await this.deps.readReviewServerState(appDir));
+    const pid = knownState?.pid ?? (await this.deps.readReviewServerPid(appDir));
+    if (!pid) return false;
+    const state: ReviewServerState = knownState ?? {
+      pid,
+      url: params.review.url ?? "",
+      appDir,
+      reviewId: params.review.reviewId,
+      startedAt: params.review.updatedAt,
+    };
+    return await this.deps.stopReviewServerState(state, params.reviewPath);
+  }
+}
+
+const activeReviewServersByPath = new Map<string, ReviewServerState>();
 const cleanupReviewServersByPath = new Map<string, ReviewServerState>();
-const abortCleanupByCwd = new Map<string, () => void>();
+const abortCleanupByReviewPath = new Map<string, () => void>();
 const finishWatchersByReviewPath = new Map<string, ReturnType<typeof setInterval>>();
 let processCleanupRegistered = false;
 
-function sanitizePathSegment(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 160) || randomUUID();
-}
+const reviewIdentifier = new ReviewIdentifierClass({}, {});
+const reviewServerLifecycle = new ReviewServerLifecycleClass(
+  {},
+  {
+    activeReviewServersByPath,
+    readReviewServerPid,
+    readReviewServerState,
+    stopReviewServerState,
+  },
+);
 
 export type OpenReviewOptions = {
   cwd: string;
@@ -66,7 +121,9 @@ export async function openReview(
   options: OpenReviewOptions,
 ): Promise<ReviewPointer> {
   const cwd = resolve(options.cwd);
-  const sessionId = sanitizePathSegment(options.sessionId ?? `cli-${process.pid}`);
+  const sessionId = reviewIdentifier.sanitizePathSegment({
+    value: options.sessionId ?? `cli-${process.pid}`,
+  });
   const reviewUUID = randomUUID();
   const reviewId = `${sessionId}-${reviewUUID}`;
   const appDir = resolve(cwd, ".lgtm", reviewId);
@@ -76,9 +133,9 @@ export async function openReview(
     reviewSourceBuilder.build({ file, index }),
   );
 
-  if (options.replaceActiveReview !== false) {
+  if (options.replaceActiveReview === true) {
     options.onUpdate?.("Stopping any previous LGTM review server...");
-    await stopActiveReviewServer(cwd);
+    await stopActiveReviewServers(cwd);
   }
   await mkdir(appDir, { recursive: true });
 
@@ -120,6 +177,7 @@ export async function openReview(
   };
   try {
     throwIfAborted(options.signal);
+    await writeReviewServerState(serverState);
     const url = server.url;
     await writeFile(
       reviewPath,
@@ -128,13 +186,14 @@ export async function openReview(
     );
 
     if (options.trackAsActiveReview !== false) {
-      await writeReviewServerState(cwd, serverState);
-      activeReviewServersByCwd.set(cwd, serverState);
+      activeReviewServersByPath.set(reviewPath, serverState);
     }
     if (options.signal && options.trackAsActiveReview !== false) {
-      const abort = () => void stopActiveReviewServer(cwd);
+      const abort = () => void stopReview(cwd, reviewPath);
       options.signal.addEventListener("abort", abort, { once: true });
-      abortCleanupByCwd.set(cwd, () => options.signal?.removeEventListener("abort", abort));
+      abortCleanupByReviewPath.set(reviewPath, () =>
+        options.signal?.removeEventListener("abort", abort),
+      );
       if (options.signal.aborted) abort();
     }
     if (options.cleanupOnExit) {
@@ -151,18 +210,14 @@ export async function openReview(
       url,
       reviewPath,
     };
-    lastReviewByCwd.set(cwd, pointer);
     if (options.onFinished) startReviewFinishWatcher(cwd, pointer, options.onFinished);
     if (options.openBrowser !== false) openInDefaultBrowser(url);
     return pointer;
   } catch (error) {
     if (options.trackAsActiveReview !== false) {
-      abortCleanupByCwd.get(cwd)?.();
-      abortCleanupByCwd.delete(cwd);
-      if (activeReviewServersByCwd.get(cwd) === serverState) {
-        activeReviewServersByCwd.delete(cwd);
-      }
-      await unlink(getActiveReviewServerPath(cwd)).catch(() => undefined);
+      abortCleanupByReviewPath.get(reviewPath)?.();
+      abortCleanupByReviewPath.delete(reviewPath);
+      activeReviewServersByPath.delete(reviewPath);
     }
     cleanupReviewServersByPath.delete(reviewPath);
     await stopReviewServerProcess(serverState).catch(() => false);
@@ -613,76 +668,35 @@ function contentTypeForPath(path: string) {
   return contentTypes[extname(path).toLowerCase()] ?? "application/octet-stream";
 }
 
-function getActiveReviewServerPath(cwd: string) {
-  return join(cwd, ".lgtm", "active-server.json");
-}
-
-async function writeReviewServerState(cwd: string, state: ReviewServerState) {
-  await mkdir(join(cwd, ".lgtm"), { recursive: true });
-  await writeFile(getActiveReviewServerPath(cwd), `${JSON.stringify(state, null, 2)}\n`, "utf8");
+async function writeReviewServerState(state: ReviewServerState) {
   await writeFile(join(state.appDir, "server.json"), `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
 
-async function readReviewServerState(cwd: string): Promise<ReviewServerState | undefined> {
+async function readReviewServerState(appDir: string): Promise<ReviewServerState | undefined> {
   try {
     const state = JSON.parse(
-      await readFile(getActiveReviewServerPath(cwd), "utf8"),
+      await readFile(join(appDir, "server.json"), "utf8"),
     ) as ReviewServerState;
-    if (Number.isInteger(state.pid) && typeof state.appDir === "string") return state;
+    if (
+      Number.isInteger(state.pid) &&
+      typeof state.appDir === "string" &&
+      resolve(state.appDir) === resolve(appDir)
+    ) {
+      return state;
+    }
   } catch {
-    // No active server state.
+    // No server state.
   }
   return undefined;
 }
 
-async function stopActiveReviewServer(cwd: string) {
-  abortCleanupByCwd.get(cwd)?.();
-  abortCleanupByCwd.delete(cwd);
-  const state = activeReviewServersByCwd.get(cwd) ?? (await readReviewServerState(cwd));
-  let stopped = false;
-  if (state) {
-    await stopReviewFinishWatcherForAppDir(state.appDir);
-    stopped = await stopReviewServerProcess(state);
-    cleanupReviewServersByPath.delete(join(state.appDir, "review.json"));
-    activeReviewServersByCwd.delete(cwd);
-    await unlink(getActiveReviewServerPath(cwd)).catch(() => undefined);
-  }
-
-  return stopped;
-}
-
-async function stopKnownReviewServers(cwd: string) {
-  const baseDir = join(cwd, ".lgtm");
-  let stopped = false;
-  let entries;
-  try {
-    entries = await readdir(baseDir, { withFileTypes: true });
-  } catch {
-    return false;
-  }
-
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const appDir = join(baseDir, entry.name);
-    const pid = await readReviewServerPid(appDir);
-    if (!pid) continue;
-    const review = await readReviewIfExists(join(appDir, "review.json"));
-    if (review?.url && !(await isReviewServerUrlForApp(review.url, appDir))) continue;
-    if (
-      await stopReviewServerProcess({
-        pid,
-        url: review?.url ?? "",
-        appDir,
-        reviewId: review?.reviewId ?? entry.name,
-        startedAt: review?.updatedAt ?? "",
-      })
-    ) {
-      stopReviewFinishWatcher(review?.reviewPath ?? join(appDir, "review.json"));
-      cleanupReviewServersByPath.delete(review?.reviewPath ?? join(appDir, "review.json"));
-      stopped = true;
-    }
-  }
-  return stopped;
+async function stopActiveReviewServers(cwd: string) {
+  const reviewRoot = `${join(resolve(cwd), ".lgtm")}${sep}`;
+  const states = [...activeReviewServersByPath.values()].filter((state) =>
+    state.appDir.startsWith(reviewRoot),
+  );
+  const stopped = await Promise.all(states.map((state) => stopReviewServerState(state)));
+  return stopped.some(Boolean);
 }
 
 function startReviewFinishWatcher(
@@ -702,7 +716,9 @@ function startReviewFinishWatcher(
 
     if (review.status === "open") return;
     stopReviewFinishWatcher(pointer.reviewPath);
-    await stopReviewServerForReview(cwd, review, pointer.reviewPath).catch(() => false);
+    await reviewServerLifecycle
+      .stopForReview({ review, reviewPath: pointer.reviewPath })
+      .catch(() => false);
     await onFinished(review, formatReviewForModel(review, pointer.reviewPath));
   }, 1_000);
 
@@ -717,39 +733,23 @@ function stopReviewFinishWatcher(reviewPath: string) {
   finishWatchersByReviewPath.delete(reviewPath);
 }
 
-async function stopReviewFinishWatcherForAppDir(appDir: string) {
-  const reviewPath = join(appDir, "review.json");
-  const review = await readReviewIfExists(reviewPath);
-  stopReviewFinishWatcher(review?.reviewPath ?? reviewPath);
-}
-
-function stopAllReviewFinishWatchers() {
+function stopReviewFinishWatchers(cwd: string) {
+  const reviewRoot = `${join(resolve(cwd), ".lgtm")}${sep}`;
   for (const reviewPath of finishWatchersByReviewPath.keys()) {
-    stopReviewFinishWatcher(reviewPath);
+    if (reviewPath.startsWith(reviewRoot)) stopReviewFinishWatcher(reviewPath);
   }
 }
 
-async function stopReviewServerForReview(cwd: string, review: ReviewJson, reviewPath: string) {
-  const activeState = activeReviewServersByCwd.get(cwd) ?? (await readReviewServerState(cwd));
-  if (
-    activeState &&
-    (activeState.reviewId === review.reviewId || activeState.appDir === review.appDir)
-  ) {
-    return await stopActiveReviewServer(cwd);
-  }
-
-  const appDir = review.appDir || resolve(reviewPath, "..");
-  const pid = await readReviewServerPid(appDir);
-  if (!pid) return false;
-  const stopped = await stopReviewServerProcess({
-    pid,
-    url: review.url ?? "",
-    appDir,
-    reviewId: review.reviewId,
-    startedAt: review.updatedAt,
-  });
+async function stopReviewServerState(
+  state: ReviewServerState,
+  reviewPath = join(state.appDir, "review.json"),
+) {
+  abortCleanupByReviewPath.get(reviewPath)?.();
+  abortCleanupByReviewPath.delete(reviewPath);
+  const stopped = await stopReviewServerProcess(state);
   cleanupReviewServersByPath.delete(reviewPath);
-  if (stopped) stopReviewFinishWatcher(review.reviewPath ?? reviewPath);
+  activeReviewServersByPath.delete(reviewPath);
+  if (stopped) stopReviewFinishWatcher(reviewPath);
   return stopped;
 }
 
@@ -757,7 +757,7 @@ export async function stopReview(cwd: string, reviewPath: string) {
   const review = await readReviewIfExists(reviewPath);
   if (!review) return false;
   stopReviewFinishWatcher(reviewPath);
-  return await stopReviewServerForReview(resolve(cwd), review, reviewPath);
+  return await reviewServerLifecycle.stopForReview({ review, reviewPath });
 }
 
 async function readReviewServerPid(appDir: string) {
@@ -805,19 +805,6 @@ async function isLikelyReviewServerProcess(pid: number) {
   }
 }
 
-async function isReviewServerUrlForApp(url: string, appDir: string) {
-  try {
-    const response = await fetch(new URL("/api/payload", url), {
-      signal: AbortSignal.timeout(800),
-    });
-    if (!response.ok) return false;
-    const payload = (await response.json()) as { appDir?: unknown };
-    return payload.appDir === appDir;
-  } catch {
-    return false;
-  }
-}
-
 function isProcessRunning(pid: number) {
   try {
     process.kill(pid, 0);
@@ -858,13 +845,6 @@ function registerProcessCleanup() {
   process.once("exit", () => {
     for (const state of cleanupReviewServersByPath.values()) {
       killReviewServerPid(state.pid, "SIGTERM");
-    }
-    for (const cwd of activeReviewServersByCwd.keys()) {
-      try {
-        unlinkSync(getActiveReviewServerPath(cwd));
-      } catch {
-        // Already removed.
-      }
     }
   });
 }
@@ -968,7 +948,7 @@ export async function waitForReview(
         const stoppedServer =
           options.stopServer === false
             ? false
-            : await stopReviewServerForReview(resolve(options.cwd), review, pointer.reviewPath);
+            : await reviewServerLifecycle.stopForReview({ review, reviewPath: pointer.reviewPath });
         return {
           reviewPath: pointer.reviewPath,
           review: review as ReviewJson & { status: ReviewOutcome },
@@ -1019,17 +999,14 @@ function abortableDelay(milliseconds: number, signal?: AbortSignal) {
 
 export async function finishReview(
   cwd: string,
-  explicitReviewPath?: string,
+  reviewPathInput: string,
 ): Promise<FinishReviewResult> {
   const resolvedCwd = resolve(cwd);
-  const reviewPath = explicitReviewPath
-    ? resolve(resolvedCwd, explicitReviewPath)
-    : await resolveReviewPath(resolvedCwd);
-  if (!reviewPath) return { found: false };
-
-  const review = JSON.parse(await readFile(reviewPath, "utf8")) as ReviewJson;
+  const reviewPath = resolve(resolvedCwd, reviewPathInput);
+  const review = await readReviewIfExists(reviewPath);
+  if (!review) return { found: false };
   stopReviewFinishWatcher(reviewPath);
-  const stoppedServer = await stopReviewServerForReview(resolvedCwd, review, reviewPath);
+  const stoppedServer = await reviewServerLifecycle.stopForReview({ review, reviewPath });
   return {
     found: true,
     reviewPath,
@@ -1040,40 +1017,9 @@ export async function finishReview(
 }
 
 export async function stopReviews(cwd: string) {
-  stopAllReviewFinishWatchers();
   const resolvedCwd = resolve(cwd);
-  const activeStopped = await stopActiveReviewServer(resolvedCwd);
-  const knownStopped = await stopKnownReviewServers(resolvedCwd);
-  return activeStopped || knownStopped;
-}
-
-async function resolveReviewPath(cwd: string): Promise<string | undefined> {
-  const pointer = lastReviewByCwd.get(cwd);
-  if (pointer) return pointer.reviewPath;
-
-  return findLatestReviewPath(cwd);
-}
-
-async function findLatestReviewPath(cwd: string): Promise<string | undefined> {
-  const baseDir = join(cwd, ".lgtm");
-  try {
-    const entries = await readdir(baseDir, { withFileTypes: true });
-    const candidates: Array<{ path: string; mtimeMs: number }> = [];
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const reviewPath = join(baseDir, entry.name, "review.json");
-      try {
-        const info = await stat(reviewPath);
-        candidates.push({ path: reviewPath, mtimeMs: info.mtimeMs });
-      } catch {
-        // Ignore folders without review.json.
-      }
-    }
-    candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
-    return candidates[0]?.path;
-  } catch {
-    return undefined;
-  }
+  stopReviewFinishWatchers(resolvedCwd);
+  return await stopActiveReviewServers(resolvedCwd);
 }
 
 export function formatReviewForModel(review: ReviewJson, reviewPath: string): string {

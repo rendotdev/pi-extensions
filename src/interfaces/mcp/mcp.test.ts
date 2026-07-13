@@ -75,6 +75,9 @@ describe("LGTM MCP tools", () => {
       "open_document_review",
       "finish_review",
     ]);
+    expect(mcpTools.find((tool) => tool.name === "finish_review")?.inputSchema).toEqual(
+      expect.objectContaining({ required: ["reviewPath"] }),
+    );
   });
 
   it("keeps an open Git tool call pending through waitForReview and returns the decision", async () => {
@@ -157,6 +160,16 @@ describe("LGTM MCP tools", () => {
     expect(runtime.finishReview).toHaveBeenCalledWith("/tmp/project", ".lgtm/review/review.json");
   });
 
+  it("requires a review path when finishing", async () => {
+    const runtime = dependencies();
+    const handle = createMcpToolHandler(runtime);
+
+    await expect(
+      handle("finish_review", { cwd: "/tmp/project" }, new AbortController().signal),
+    ).rejects.toThrow("reviewPath is required");
+    expect(runtime.finishReview).not.toHaveBeenCalled();
+  });
+
   it("rejects an overlapping blocking review for the same project", async () => {
     const runtime = dependencies();
     runtime.waitForReview = waitUntilAborted();
@@ -212,7 +225,11 @@ describe("LGTM MCP tools", () => {
     const blockingResult = expect(blockingReview).rejects.toThrow(`stopped by ${lifecycleTool}`);
     await vi.waitFor(() => expect(runtime.waitForReview).toHaveBeenCalledOnce());
 
-    await handle(lifecycleTool, { cwd: "/tmp/project" }, new AbortController().signal);
+    await handle(
+      lifecycleTool,
+      { cwd: "/tmp/project", reviewPath: pointer.reviewPath },
+      new AbortController().signal,
+    );
 
     await blockingResult;
   });

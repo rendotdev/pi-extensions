@@ -21,9 +21,10 @@ describe("LgtmPiExtensionClass", () => {
         sentMessages.push({ content, deliverAs: options?.deliverAs });
       },
     } as unknown as ExtensionAPI;
+    const finishReview = vi.fn(async () => ({ found: false as const }));
     const extension = new LgtmPiExtensionClass({
       collectGitReviewFiles: vi.fn(async () => []),
-      finishReview: vi.fn(async () => ({ found: false as const })),
+      finishReview,
       openReview: vi.fn(async (_input, options) => {
         reviewOptions = options;
         return {
@@ -68,10 +69,23 @@ describe("LgtmPiExtensionClass", () => {
     } as ReviewJson;
     await reviewOptions?.onFinished?.(approvedReview, "Review status: approved");
 
+    const finishReviewTool = tools.find((tool) => tool.name === "lgtm-finish-review");
+    await finishReviewTool?.execute(
+      "tool-call-2",
+      { reviewPath: ".lgtm/session-1-review-1/review.json" },
+      undefined,
+      undefined,
+      { cwd: "/tmp/project" } as ExtensionContext,
+    );
+
     expect(sentMessages).toHaveLength(1);
     expect(sentMessages[0]?.deliverAs).toBe("followUp");
     expect(sentMessages[0]?.content).toContain("supplements the existing conversation");
     expect(sentMessages[0]?.content).toContain("Preserve the original user goal");
     expect(sentMessages[0]?.content).toContain("Review status: approved");
+    expect(finishReview).toHaveBeenCalledWith(
+      "/tmp/project",
+      ".lgtm/session-1-review-1/review.json",
+    );
   });
 });

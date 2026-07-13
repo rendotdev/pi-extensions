@@ -56,7 +56,7 @@ export class LgtmPiExtensionClass {
       onFinished: async (review, formattedReview) => {
         const decision =
           review.status === "approved"
-            ? "approved with LGTM"
+            ? "approved"
             : review.status === "canceled"
               ? "canceled"
               : "returned with review comments";
@@ -220,16 +220,19 @@ export class LgtmPiExtensionClass {
     return defineTool({
       name: "lgtm-finish-review",
       label: "Finish LGTM Review",
-      description: "Read the active or latest LGTM review result and always stop its local server.",
-      promptSnippet:
-        "lgtm-finish-review: Recover the active or latest LGTM result and stop its server.",
+      description: "Read a specified LGTM review result and always stop its local server.",
+      promptSnippet: "lgtm-finish-review: Recover a specified LGTM result and stop its server.",
       promptGuidelines: [
-        "Use lgtm-finish-review only when the user requests it or when a completed review did not return its automatic follow-up.",
+        "Use lgtm-finish-review with the exact reviewPath only when the user requests it or when a completed review did not return its automatic follow-up.",
       ],
       executionMode: "sequential",
-      parameters: Type.Object({}),
-      execute: async (_toolCallId, _params, _signal, _onUpdate, ctx) => {
-        const result = await this.deps.finishReview(ctx.cwd);
+      parameters: Type.Object({
+        reviewPath: Type.String({
+          description: "review.json path returned when opening the review.",
+        }),
+      }),
+      execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+        const result = await this.deps.finishReview(ctx.cwd, params.reviewPath);
         if (!result.found) {
           return {
             content: [{ type: "text" as const, text: "No LGTM review was found." }],

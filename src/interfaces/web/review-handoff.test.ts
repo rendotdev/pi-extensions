@@ -33,8 +33,6 @@ describe("ReviewHandoffClass", () => {
       }),
     ).toBe(`PTAL: /Users/example/project/.lgtm/session/review.json
 
-LGTM could not save or finish the local review. These comments were recovered from the browser:
-
 # Authentication review
 
 ## src/auth.ts:12

@@ -30,7 +30,7 @@ const command = helpRequested
   ? "help"
   : args[0] && !args[0].startsWith("--")
     ? (args.shift() as string)
-    : "git";
+    : "help";
 const jsonOutput = takeFlag("--json");
 const cwd = resolve(takeOption("--cwd") ?? process.cwd());
 const cancellation = new AbortController();
@@ -99,12 +99,11 @@ function helpText() {
   return `LGTM, human approval for agent work
 
 Usage:
-  lgtm [--name <name>] [--cwd <path>] [--json]
-  lgtm git [--name <name>] [--cwd <path>] [--json]
-  lgtm worktree <path> [--name <name>] [--cwd <path>] [--json]
-  lgtm json [review.json] [--name <name>] [--cwd <path>] [--json]
-  lgtm document [markdown-file] [--name <name>] [--cwd <path>] [--json]
-  lgtm finish [--cwd <path>] [--json]
+  lgtm review [git] [--name <name>] [--cwd <path>] [--json]
+  lgtm review worktree <path> [--name <name>] [--cwd <path>] [--json]
+  lgtm review json [review.json] [--name <name>] [--cwd <path>] [--json]
+  lgtm review document [markdown-file] [--name <name>] [--cwd <path>] [--json]
+  lgtm review result --review-path <path> [--cwd <path>] [--json]
   lgtm mcp
   lgtm setup [--target <all|pi|claude|codex>] [--dry-run] [--json]
   lgtm update [--target <all|pi|claude|codex>] [--dry-run] [--json]
@@ -117,7 +116,7 @@ JSON review schema:
     ]
   }
 
-Bare lgtm reviews the current Git changes. Document Markdown and review JSON are read from stdin when no file is supplied.`;
+Run \`lgtm review\` to review current Git changes. Document Markdown and review JSON are read from stdin when no file is supplied. Review outcomes are \`approved\`, \`changes_requested\`, or \`canceled\`.`;
 }
 
 function formatIntegrationResult(params: {
@@ -241,96 +240,95 @@ async function main() {
     return;
   }
 
-  if (command === "git") {
-    const name = takeOption("--name") ?? "Git review";
-    await runCommand({
-      label: "Opening Git review",
-      execute: async (report) => {
-        report("Collecting Git changes");
-        const files = await collectGitReviewFiles(cwd);
-        return await openReview({ kind: "diff", name, files }, reviewOptions(report));
-      },
-      renderSuccess: formatPointer,
-    });
-    return;
-  }
+  if (command === "review") {
+    const reviewCommand = args[0] && !args[0].startsWith("--") ? (args.shift() as string) : "git";
 
-  if (command === "worktree") {
-    const worktree = args.shift();
-    if (!worktree) throw new Error("worktree requires a path.");
-    const name = takeOption("--name") ?? "Worktree review";
-    await runCommand({
-      label: "Opening worktree review",
-      execute: async (report) => {
-        report("Collecting worktree changes");
-        const files = await collectGitReviewFiles(resolve(cwd, worktree));
-        return await openReview({ kind: "diff", name, files }, reviewOptions(report));
-      },
-      renderSuccess: formatPointer,
-    });
-    return;
-  }
+    if (reviewCommand === "git") {
+      const name = takeOption("--name") ?? "Git review";
+      await runCommand({
+        label: "Opening Git review",
+        execute: async (report) => {
+          report("Collecting Git changes");
+          const files = await collectGitReviewFiles(cwd);
+          return await openReview({ kind: "diff", name, files }, reviewOptions(report));
+        },
+        renderSuccess: formatPointer,
+      });
+      return;
+    }
 
-  if (command === "json" || command === "custom") {
-    const positionalInput = args[0]?.startsWith("--") ? undefined : args.shift();
-    const inputPath = takeOption("--input") ?? positionalInput;
-    await runCommand({
-      label: "Opening JSON review",
-      execute: async (report) => {
-        report("Reading review JSON");
-        const input = JsonReviewInputParser.parse({
-          value: JSON.parse(await readInput(inputPath)) as unknown,
-        });
-        const name = takeOption("--name") ?? input.name ?? "JSON review";
-        return await openReview({ kind: "diff", name, files: input.files }, reviewOptions(report));
-      },
-      renderSuccess: formatPointer,
-    });
-    return;
-  }
+    if (reviewCommand === "worktree") {
+      const worktree = args.shift();
+      if (!worktree) throw new Error("worktree requires a path.");
+      const name = takeOption("--name") ?? "Worktree review";
+      await runCommand({
+        label: "Opening worktree review",
+        execute: async (report) => {
+          report("Collecting worktree changes");
+          const files = await collectGitReviewFiles(resolve(cwd, worktree));
+          return await openReview({ kind: "diff", name, files }, reviewOptions(report));
+        },
+        renderSuccess: formatPointer,
+      });
+      return;
+    }
 
-  if (command === "document") {
-    const documentPath = args[0]?.startsWith("--") ? undefined : args.shift();
-    await runCommand({
-      label: "Opening document review",
-      execute: async (report) => {
-        report("Reading Markdown document");
-        const markdown = await readInput(documentPath);
-        if (!markdown.trim()) throw new Error("Document review requires Markdown input.");
-        const name =
-          takeOption("--name") ?? (documentPath ? `Review ${documentPath}` : "Document review");
-        return await openReview(
-          { kind: "document", name, document: { markdown, location: documentPath } },
-          reviewOptions(report),
-        );
-      },
-      renderSuccess: formatPointer,
-    });
-    return;
-  }
+    if (reviewCommand === "json") {
+      const positionalInput = args[0]?.startsWith("--") ? undefined : args.shift();
+      const inputPath = takeOption("--input") ?? positionalInput;
+      await runCommand({
+        label: "Opening JSON review",
+        execute: async (report) => {
+          report("Reading review JSON");
+          const input = JsonReviewInputParser.parse({
+            value: JSON.parse(await readInput(inputPath)) as unknown,
+          });
+          const name = takeOption("--name") ?? input.name ?? "JSON review";
+          return await openReview(
+            { kind: "diff", name, files: input.files },
+            reviewOptions(report),
+          );
+        },
+        renderSuccess: formatPointer,
+      });
+      return;
+    }
 
-  if (command === "finish") {
-    await runCommand({
-      label: "Finishing LGTM review",
-      execute: async () => await finishReview(cwd),
-      renderSuccess: (result) =>
-        !result.found
-          ? "No LGTM review found."
-          : `${result.formattedReview}\n\nServer stopped: ${result.stoppedServer ? "yes" : "no"}`,
-    });
-    return;
-  }
+    if (reviewCommand === "document") {
+      const documentPath = args[0]?.startsWith("--") ? undefined : args.shift();
+      await runCommand({
+        label: "Opening document review",
+        execute: async (report) => {
+          report("Reading Markdown document");
+          const markdown = await readInput(documentPath);
+          if (!markdown.trim()) throw new Error("Document review requires Markdown input.");
+          const name =
+            takeOption("--name") ?? (documentPath ? `Review ${documentPath}` : "Document review");
+          return await openReview(
+            { kind: "document", name, document: { markdown, location: documentPath } },
+            reviewOptions(report),
+          );
+        },
+        renderSuccess: formatPointer,
+      });
+      return;
+    }
 
-  if (command === "stop") {
-    await runCommand({
-      label: "Stopping LGTM review",
-      execute: async () => await finishReview(cwd),
-      renderSuccess: (result) =>
-        !result.found
-          ? "No LGTM review found."
-          : `${result.formattedReview}\n\nServer stopped: ${result.stoppedServer ? "yes" : "no"}`,
-    });
-    return;
+    if (reviewCommand === "result") {
+      const reviewPath = takeOption("--review-path");
+      if (!reviewPath) throw new Error("result requires --review-path.");
+      await runCommand({
+        label: "Reading LGTM review result",
+        execute: async () => await finishReview(cwd, reviewPath),
+        renderSuccess: (result) =>
+          !result.found
+            ? "No LGTM review found."
+            : `${result.formattedReview}\n\nServer stopped: ${result.stoppedServer ? "yes" : "no"}`,
+      });
+      return;
+    }
+
+    throw new Error(`Unknown review command: ${reviewCommand}`);
   }
 
   throw new Error(`Unknown command: ${command}`);

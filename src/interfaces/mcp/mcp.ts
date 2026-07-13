@@ -124,13 +124,17 @@ export const mcpTools: McpTool[] = [
   },
   {
     name: "finish_review",
-    description: "Read the current or specified review result and stop its local server.",
+    description: "Read the specified review result and stop its local server.",
     inputSchema: {
       type: "object",
       properties: {
         cwd: commonProperties.cwd,
-        reviewPath: { type: "string", description: "Optional review.json path." },
+        reviewPath: {
+          type: "string",
+          description: "review.json path returned when opening the review.",
+        },
       },
+      required: ["reviewPath"],
       additionalProperties: false,
     },
   },
@@ -289,7 +293,7 @@ export function createMcpToolHandler(dependencies: McpRuntimeDependencies = defa
     }
 
     if (name === "finish_review") {
-      const result = await dependencies.finishReview(cwd, optionalString(args, "reviewPath"));
+      const result = await dependencies.finishReview(cwd, requiredString(args, "reviewPath"));
       if (result.found && result.review.status === "open") {
         abortActiveOpen(cwd, result.reviewPath, "Review stopped by finish_review.");
       }

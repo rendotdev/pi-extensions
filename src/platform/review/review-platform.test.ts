@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import type { ReviewJson, ReviewOutcome, ReviewPointer } from "../../domain/review/review.ts";
-import { waitForReview } from "./review-platform.ts";
+import { openReview, stopReview, waitForReview } from "./review-platform.ts";
 
 const temporaryDirectories: string[] = [];
 
@@ -80,5 +80,33 @@ describe("waitForReview", () => {
     controller.abort(new DOMException("test cancellation", "AbortError"));
 
     await expect(waiting).rejects.toThrow("test cancellation");
+  });
+});
+
+describe("openReview", () => {
+  it("keeps simultaneous reviews in the same checkout independent", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "lgtm-concurrent-"));
+    temporaryDirectories.push(cwd);
+    const first = await openReview(
+      { kind: "document", name: "First", document: { markdown: "# First" } },
+      { cwd, openBrowser: false, detachedServer: false },
+    );
+    const second = await openReview(
+      { kind: "document", name: "Second", document: { markdown: "# Second" } },
+      { cwd, openBrowser: false, detachedServer: false },
+    );
+
+    try {
+      expect(first.reviewPath).not.toBe(second.reviewPath);
+      expect(await fetch(new URL("/api/payload", first.url))).toHaveProperty("ok", true);
+      expect(await fetch(new URL("/api/payload", second.url))).toHaveProperty("ok", true);
+
+      expect(await stopReview(cwd, first.reviewPath)).toBe(true);
+      await expect(fetch(new URL("/api/payload", first.url))).rejects.toThrow();
+      expect(await fetch(new URL("/api/payload", second.url))).toHaveProperty("ok", true);
+    } finally {
+      await stopReview(cwd, first.reviewPath);
+      await stopReview(cwd, second.reviewPath);
+    }
   });
 });

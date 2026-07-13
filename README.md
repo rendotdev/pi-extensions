@@ -20,20 +20,20 @@ lgtm setup
 Review the current Git changes:
 
 ```bash
-lgtm
+lgtm review
 ```
 
-`lgtm git` is the explicit form of the same command.
+`lgtm review git` is the explicit form of the same command.
 
-LGTM opens the review in your browser. Switch between **Unified** and **Side by side** diff layouts, choose **LGTM** to approve, **Send comments** to return your feedback, or **Cancel** to stop. LGTM saves your layout preference in `.lgtm/lgtm.jsonc` at the project root. The agent gets the result and continues from there.
+LGTM opens the review in your browser. Switch between **Unified** and **Side by side** diff layouts, choose **Approve** to approve, **Send comments** to return your feedback, or **Cancel** to stop. The review result is `approved`, `changes_requested`, or `canceled`. Each review has its own server and directory, so agents can review multiple repositories, worktrees, or checkpoints at once. LGTM saves your layout preference in `.lgtm/lgtm.jsonc` at the project root. The agent gets the result and continues from there.
 
 Other useful commands:
 
 ```bash
-lgtm worktree ../feature-worktree
-lgtm document PLAN.md
-lgtm json review.json
-lgtm finish
+lgtm review worktree ../feature-worktree
+lgtm review document PLAN.md
+lgtm review json review.json
+lgtm review result --review-path .lgtm/<review-id>/review.json
 lgtm update
 ```
 
@@ -52,7 +52,7 @@ JSON reviews use explicit before-and-after file content:
 }
 ```
 
-`lgtm finish` reads the latest review result and stops its local server.
+`lgtm review result` always requires the exact `Review JSON` path printed when opening a review, then reads that result and stops only its server: `lgtm review result --review-path .lgtm/<review-id>/review.json`.
 
 `lgtm update` updates the CLI and every installed agent integration. Add `--json` for machine-readable output, `--cwd <path>` to choose another workspace, or `--dry-run` to preview install and update commands.
 
@@ -61,7 +61,7 @@ JSON reviews use explicit before-and-after file content:
 LGTM works best as the final step in an agent task. Try a prompt like this:
 
 ```text
-Make the change, test it, then use LGTM so I can review your work before you finish.
+Make the change, test it, then run `lgtm review` so I can approve or comment before you finish.
 ```
 
 The shared skill teaches agents how to open the right review and continue after your decision. The same npm package carries the CLI, browser app, Pi extension, Claude Code plugin, Codex plugin, MCP server, and skill.

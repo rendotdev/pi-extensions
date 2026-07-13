@@ -1,6 +1,6 @@
 ---
 name: lgtm
-description: Open a local LGTM browser checkpoint so a human can approve agent work or leave contextual comments, then continue the original task from that decision. Use when the user asks for LGTM, PTAL, review, approval, a browser diff, document annotations, or a human checkpoint before completion.
+description: Open a local LGTM browser checkpoint so a human can approve agent work or leave contextual comments, then continue the original task from that decision. Use when the user asks for LGTM, `lgtm review`, PTAL, review, approval, a browser diff, document annotations, or a human checkpoint before completion.
 ---
 
 # LGTM
@@ -19,15 +19,15 @@ Prefer the bundled MCP tools when they are available. They keep the tool call op
 
 Use the matching source-specific open tool after the work is ready and validated. Do not open a duplicate while the human is reviewing.
 
-When MCP tools are unavailable, run `lgtm --help` and use the equivalent CLI command:
+When MCP tools are unavailable, running `lgtm review` is a possible CLI path. Run `lgtm --help`, then use the equivalent command:
 
 Use one command that matches the work being reviewed:
 
 ```bash
-lgtm --name "Review current changes"
-lgtm worktree ../feature-worktree --name "Review feature worktree"
-lgtm document PLAN.md --name "Review implementation plan"
-lgtm json review.json --name "Review generated changes"
+lgtm review --name "Review current changes"
+lgtm review worktree ../feature-worktree --name "Review feature worktree"
+lgtm review document PLAN.md --name "Review implementation plan"
+lgtm review json review.json --name "Review generated changes"
 ```
 
 - `git` reviews staged, unstaged, and untracked text changes in the selected checkout.
@@ -42,10 +42,10 @@ Add `--cwd <path>` when the review belongs to a different workspace. Add `--json
 1. Complete a reviewable draft and run proportionate validation.
 2. Preserve the original user goal, constraints, completed work, validation evidence, and remaining steps in the current task context.
 3. Open one review with the matching MCP tool or CLI command. Do not open a duplicate while the human is reviewing.
-4. Give the human the review URL and wait. Keep the review open until they select **LGTM**, **Send comments**, or **Cancel**.
+4. Give the human the review URL and wait. Keep the review open until they select **Approve**, **Send comments**, or **Cancel**.
 5. Interpret the result in the context of the original task:
-   - `LGTM` means the human approved this checkpoint. Complete any remaining requested work without reopening unchanged content.
+   - `approved` means the human approved this checkpoint. Complete any remaining requested work without reopening unchanged content.
    - `PTAL: <path>` points to the saved `review.json`. Read that exact file, apply every actionable comment, validate the revision, and reopen when another approval is required.
    - Cancel is not approval. Preserve the work and wait when continuing would require approval.
 
-Use `lgtm finish --cwd <path>` to recover the latest result and stop its server when the automatic handoff is missing or the user asks to stop the review. Never finish an active review as part of unrelated development checks.
+Use `lgtm review result --review-path <path> --cwd <path>` to recover that exact result and stop only its server when the automatic handoff is missing or the user asks to stop the review. Never read the result of an active review as part of unrelated development checks.
