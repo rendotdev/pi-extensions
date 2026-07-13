@@ -17,6 +17,8 @@ import {
   type ReviewPayload,
   type ReviewPointer,
 } from "../../domain/review/review.ts";
+import { lgtmPreferences } from "../../domain/preferences/preferences.ts";
+import { LgtmPreferencesPlatformClass } from "../preferences/preferences-platform.ts";
 
 type CommandResult = {
   stdout: string;
@@ -413,6 +415,8 @@ export async function serveReviewApp(appDirInput: string): Promise<void> {
   const appDir = resolve(appDirInput);
   const payloadPath = join(appDir, "payload.json");
   const reviewPath = join(appDir, "review.json");
+  const payload = await readJsonFile<ReviewPayload>(payloadPath);
+  const preferencesPlatform = new LgtmPreferencesPlatformClass({ cwd: payload.cwd });
   const webRoot = await resolveWebRoot();
 
   const server = createServer(async (request, response) => {
@@ -432,6 +436,27 @@ export async function serveReviewApp(appDirInput: string): Promise<void> {
         const nextReview = { ...review, updatedAt: new Date().toISOString() };
         await writeJsonFile(reviewPath, nextReview);
         return sendJson(response, 200, nextReview);
+      }
+
+      if (url.pathname === "/api/preferences" && request.method === "GET") {
+        return sendJson(response, 200, await preferencesPlatform.read());
+      }
+
+      if (url.pathname === "/api/preferences" && request.method === "PUT") {
+        const body = await readRequestJson<unknown>(request);
+        let preferences;
+        try {
+          preferences = lgtmPreferences.parse({ value: body });
+        } catch (error) {
+          return sendJson(response, 400, {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        return sendJson(
+          response,
+          200,
+          await preferencesPlatform.write({ preferences }),
+        );
       }
 
       if (url.pathname === "/api/finish" && request.method === "POST") {

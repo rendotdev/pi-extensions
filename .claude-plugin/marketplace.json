@@ -19,10 +19,7 @@
         "name": "René-Pier Deshaies-Gélinas"
       },
       "category": "Development",
-      "tags": [
-        "code-review",
-        "human-in-the-loop"
-      ],
+      "tags": ["code-review", "human-in-the-loop"],
       "strict": true
     }
   ]

@@ -28,6 +28,8 @@ import {
   X,
 } from "lucide-react";
 import { useForm } from "@tanstack/react-form";
+import { formatForDisplay, useHotkey } from "@tanstack/react-hotkeys";
+import { useAsyncDebouncer } from "@tanstack/react-pacer/async-debouncer";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { parseDiffFromFile, type DiffLineAnnotation, type FileDiffMetadata } from "@pierre/diffs";
 import { AnimatePresence, motion } from "motion/react";
@@ -105,6 +107,7 @@ type DocumentComment = {
 };
 
 type ReviewStatus = "open" | "approved" | "changes_requested" | "canceled";
+type DiffStyle = "unified" | "split";
 
 type ReviewJson = {
   version: 2;
@@ -290,15 +293,13 @@ function App() {
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [copiedReviewPath, setCopiedReviewPath] = useState(false);
   const [isFinishing, setIsFinishing] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [recoveryStatus, setRecoveryStatus] = useState<string | null>(null);
   const [collapsedFileIds, setCollapsedFileIds] = useState<Set<string>>(() => new Set());
+  const [diffStyle, setDiffStyle] = useState<DiffStyle>("unified");
   const reviewHeaderRef = useRef<HTMLElement | null>(null);
   const deleteAllTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const saveTimer = useRef<number | null>(null);
-  const saveRun = useRef(0);
   const lastSavedSignature = useRef<string | null>(null);
 
   useEffect(() => {
@@ -343,32 +344,35 @@ function App() {
     };
   }, [isLoaded]);
 
-  const queueSave = useCallback((review: ReviewJson) => {
-    const signature = meaningfulReviewSignature(review);
-    if (signature === lastSavedSignature.current) return;
-    if (saveTimer.current) window.clearTimeout(saveTimer.current);
-    setIsSaving(true);
-    const run = saveRun.current + 1;
-    saveRun.current = run;
-    saveTimer.current = window.setTimeout(async () => {
-      try {
-        await saveReview(review);
-        if (run !== saveRun.current) return;
-        lastSavedSignature.current = signature;
-        setLastSavedAt(new Date());
-      } catch (saveError) {
-        if (run !== saveRun.current) return;
+  const saveDebouncer = useAsyncDebouncer(
+    async (review: ReviewJson) => {
+      const savedReview = await saveReview(review);
+      lastSavedSignature.current = meaningfulReviewSignature(savedReview);
+      setLastSavedAt(new Date());
+      return savedReview;
+    },
+    {
+      wait: 400,
+      onError: (saveError) => {
         toast.danger("Unable to save your comments", {
           description: errorDescription(
             saveError,
             "Check that the review server is still running.",
           ),
         });
-      } finally {
-        if (run === saveRun.current) setIsSaving(false);
-      }
-    }, 250);
-  }, []);
+      },
+    },
+    (saveState) => ({ isExecuting: saveState.isExecuting }),
+  );
+  const isSaving = saveDebouncer.state.isExecuting;
+
+  const queueSave = useCallback(
+    (review: ReviewJson) => {
+      if (meaningfulReviewSignature(review) === lastSavedSignature.current) return;
+      void saveDebouncer.maybeExecute(review);
+    },
+    [saveDebouncer],
+  );
 
   const commitReview = useCallback(
     (updater: (review: ReviewJson) => ReviewJson) => {
@@ -548,10 +552,7 @@ function App() {
       return;
     }
     try {
-      if (saveTimer.current) {
-        window.clearTimeout(saveTimer.current);
-        saveTimer.current = null;
-      }
+      saveDebouncer.cancel();
       const reviewToFinish = await saveReview(state.review);
       lastSavedSignature.current = meaningfulReviewSignature(reviewToFinish);
       const response = await fetch("/api/finish", {
@@ -585,6 +586,7 @@ function App() {
   async function cancelReview() {
     if (!state || isFinishing || isSaving) return;
     setIsFinishing(true);
+    saveDebouncer.cancel();
     try {
       const response = await fetch("/api/cancel", { method: "POST" });
       if (!response.ok) throw new Error(await response.text());
@@ -606,6 +608,22 @@ function App() {
     }
   }
 
+  const primaryDecision =
+    state && reviewCommentCount(state.review) > 0 ? "changes_requested" : "approved";
+  const canFinishReview =
+    Boolean(state) &&
+    state?.review.status === "open" &&
+    !isFinishing &&
+    !isSaving &&
+    !isDeleteDialogOpen;
+  useHotkey(
+    "Mod+Enter",
+    () => {
+      void finishReview(primaryDecision);
+    },
+    { enabled: canFinishReview, ignoreInputs: false },
+  );
+
   if (!state) {
     return (
       <div className="flex min-h-screen items-center justify-center text-slate-700">
@@ -621,9 +639,9 @@ function App() {
   const commentCount = reviewCommentCount(review);
   const hasCommentEntries = reviewHasCommentEntries(review);
   const isFinished = review.status !== "open";
-  const commentLabel = commentCount + " " + (commentCount === 1 ? "comment" : "comments");
-  const decision = commentCount > 0 ? "changes_requested" : "approved";
-  const decisionButtonLabel = commentCount > 0 ? "Send " + commentLabel : "LGTM";
+  const decision = primaryDecision;
+  const decisionButtonLabel = commentCount > 0 ? `Send (${commentCount})` : "LGTM";
+  const primaryShortcutLabel = formatForDisplay("Mod+Enter");
   const savedTime = lastSavedAt
     ? lastSavedAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
     : null;
@@ -641,8 +659,8 @@ function App() {
   const contentMaxWidth = payload.kind === "document" ? "max-w-4xl" : "max-w-7xl";
   const canToggleFiles = payload.kind === "diff" && payload.files.length > 0;
   const isDeleteAllDisabled = isFinished || isFinishing || isSaving || !hasCommentEntries;
-  const areAllFilesExpanded =
-    canToggleFiles && payload.files.every((file) => !collapsedFileIds.has(file.id));
+  const hasExpandedFiles =
+    canToggleFiles && payload.files.some((file) => !collapsedFileIds.has(file.id));
   const reviewPathParts = payload.reviewPath.split(/[\\/]/).filter(Boolean);
   const reviewFileName = reviewPathParts.at(-1) ?? "review.json";
   const reviewSessionName = reviewPathParts.at(-2) ?? "session";
@@ -654,7 +672,7 @@ function App() {
   function toggleAllFiles() {
     if (!canToggleFiles) return;
     setCollapsedFileIds(
-      areAllFilesExpanded ? new Set(payload.files.map((file) => file.id)) : new Set(),
+      hasExpandedFiles ? new Set(payload.files.map((file) => file.id)) : new Set(),
     );
   }
 
@@ -765,6 +783,26 @@ function App() {
               </InputGroup.Suffix>
             </InputGroup>
             <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2 md:ml-auto md:justify-end">
+              {payload.kind === "diff" ? (
+                <ButtonGroup size="sm" aria-label="Diff layout">
+                  <Button
+                    variant="outline"
+                    className={diffStyle === "unified" ? "bg-slate-100" : undefined}
+                    aria-pressed={diffStyle === "unified"}
+                    onPress={() => setDiffStyle("unified")}
+                  >
+                    Unified
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className={diffStyle === "split" ? "bg-slate-100" : undefined}
+                    aria-pressed={diffStyle === "split"}
+                    onPress={() => setDiffStyle("split")}
+                  >
+                    Side by side
+                  </Button>
+                </ButtonGroup>
+              ) : null}
               <div
                 role="group"
                 aria-label="Review content actions"
@@ -804,10 +842,10 @@ function App() {
                       isIconOnly
                       isDisabled={isFinished || isFinishing || !canToggleFiles}
                       onPress={toggleAllFiles}
-                      aria-label={areAllFilesExpanded ? "Collapse all files" : "Expand all files"}
+                      aria-label={hasExpandedFiles ? "Collapse all files" : "Expand all files"}
                       className="-ms-px !rounded-s-none"
                     >
-                      {areAllFilesExpanded ? (
+                      {hasExpandedFiles ? (
                         <ChevronsDownUp
                           className="text-[var(--muted)]"
                           size={reviewIconSize}
@@ -828,7 +866,7 @@ function App() {
                   </Tooltip.Trigger>
                   <Tooltip.Content placement="bottom" showArrow>
                     <Tooltip.Arrow />
-                    {areAllFilesExpanded ? "Collapse all files" : "Expand all files"}
+                    {hasExpandedFiles ? "Collapse all files" : "Expand all files"}
                   </Tooltip.Content>
                 </Tooltip>
               </div>
@@ -846,9 +884,16 @@ function App() {
                   isDisabled={isFinished || isFinishing || isSaving}
                   onPress={() => finishReview(decision)}
                   aria-label={commentCount > 0 ? "Send review comments" : "Approve this review"}
+                  aria-keyshortcuts="Meta+Enter Control+Enter"
                 >
                   <ButtonGroup.Separator />
                   {decisionButtonLabel}
+                  <kbd
+                    className="ml-1 rounded border border-white/25 px-1 py-0.5 font-mono text-[10px] leading-none text-white/80"
+                    aria-hidden="true"
+                  >
+                    {primaryShortcutLabel}
+                  </kbd>
                 </Button>
               </ButtonGroup>
             </div>
@@ -896,6 +941,7 @@ function App() {
           <DiffReviewList
             payload={payload}
             review={review}
+            diffStyle={diffStyle}
             collapsedFileIds={collapsedFileIds}
             activeCommentId={activeCommentId}
             setActiveCommentId={setActiveCommentId}
@@ -913,6 +959,7 @@ function App() {
 type ReviewFileDiffProps = {
   file: ReviewSourceFile;
   reviewFile: ReviewFile;
+  diffStyle: DiffStyle;
   activeCommentId: string | null;
   setActiveCommentId: (id: string | null) => void;
   addComment: (
@@ -943,6 +990,7 @@ const ReviewFileRow = React.memo(function ReviewFileRow(
       <ReviewFileDiff
         file={props.file}
         reviewFile={props.reviewFile}
+        diffStyle={props.diffStyle}
         activeCommentId={props.activeCommentId}
         setActiveCommentId={props.setActiveCommentId}
         addComment={props.addComment}
@@ -956,6 +1004,7 @@ const ReviewFileRow = React.memo(function ReviewFileRow(
 function DiffReviewList(props: {
   payload: ReviewPayload;
   review: ReviewJson;
+  diffStyle: DiffStyle;
   collapsedFileIds: Set<string>;
   activeCommentId: string | null;
   setActiveCommentId: (id: string | null) => void;
@@ -1074,6 +1123,7 @@ function DiffReviewList(props: {
             <ReviewFileRow
               file={file}
               reviewFile={reviewFile}
+              diffStyle={props.diffStyle}
               activeCommentId={fileActiveCommentId}
               isExpanded={!props.collapsedFileIds.has(file.id)}
               onExpandedChange={handleFileExpandedChange}
@@ -1454,7 +1504,7 @@ const ReviewFileDiff = React.memo(function ReviewFileDiff(props: ReviewFileDiffP
   const diffOptions = useMemo<NonNullable<FileDiffProps<CommentAnnotationMetadata>["options"]>>(
     () => ({
       theme: "github-light",
-      diffStyle: "unified",
+      diffStyle: props.diffStyle,
       diffIndicators: "classic",
       hunkSeparators: "metadata",
       lineDiffType: file.added + file.removed > largeDiffWordHighlightThreshold ? "none" : "word",
@@ -1475,7 +1525,7 @@ const ReviewFileDiff = React.memo(function ReviewFileDiff(props: ReviewFileDiffP
         });
       },
     }),
-    [clearSelectedLines, file],
+    [clearSelectedLines, file, props.diffStyle],
   );
 
   const commentsById = useMemo(

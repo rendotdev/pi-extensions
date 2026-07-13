@@ -119,7 +119,7 @@ Usage:
   lgtm finish [--cwd <path>] [--json]
   lgtm stop [--cwd <path>] [--json]
   lgtm mcp
-  lgtm install [--target <all|pi|claude|codex>] [--dry-run] [--json]
+  lgtm setup [--target <all|pi|claude|codex>] [--dry-run] [--json]
   lgtm update [--target <all|pi|claude|codex>] [--dry-run] [--json]
 
 Custom input:
@@ -129,7 +129,7 @@ Document Markdown and custom JSON are read from stdin when no file is supplied.`
 }
 
 function printIntegrationResult(params: {
-  action: "install" | "update";
+  action: "setup" | "update";
   target: AgentInstallTarget;
   steps: AgentInstallStep[];
   skippedTargets?: Exclude<AgentInstallTarget, "all">[];
@@ -142,7 +142,7 @@ function printIntegrationResult(params: {
   if (params.cli?.status === "updated") console.log("Updated the LGTM CLI.");
   if (params.cli?.status === "skipped") console.log(`Skipped CLI update: ${params.cli.reason}`);
   console.log(
-    `${params.action === "install" ? "Installed" : "Updated"} LGTM integrations for ${params.target}. Start a new agent session to load the plugin and skill.`,
+    `${params.action === "setup" ? "Set up" : "Updated"} LGTM integrations for ${params.target}. Start a new agent session to load the plugin and skill.`,
   );
   if (params.skippedTargets?.length) {
     console.log(`Skipped uninstalled integrations: ${params.skippedTargets.join(", ")}.`);
@@ -162,18 +162,18 @@ async function main() {
     return;
   }
 
-  if (command === "install") {
+  if (command === "setup" || command === "install") {
     const target = takeOption("--target") ?? "all";
     if (!isAgentInstallTarget(target)) {
-      throw new Error("install --target must be one of: all, pi, claude, codex.");
+      throw new Error("setup --target must be one of: all, pi, claude, codex.");
     }
     const plan = agentInstallPlanner.createPlan({ target });
     if (takeFlag("--dry-run")) {
-      printIntegrationResult({ action: "install", target, steps: plan });
+      printIntegrationResult({ action: "setup", target, steps: plan });
       return;
     }
     printIntegrationResult({
-      action: "install",
+      action: "setup",
       target,
       steps: await agentInstaller.install({ target }),
     });

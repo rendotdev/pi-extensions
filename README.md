@@ -1,97 +1,64 @@
-# LGTM
+# lgtm
 
-LGTM is a Node CLI for putting a human approval step into agent workflows. It opens code diffs and Markdown documents in a local browser review, then returns either review comments or an explicit LGTM approval.
+> Your agent says the work is done. Take one last look.
 
-## CLI
+LGTM opens your agent's changes in a local browser. You can inspect the diff, comment on exact lines, and either approve the work or send it back with feedback.
 
-Run LGTM directly with `npx`:
+It also reviews Markdown. Plans, specifications, documentation, and other prose get the same human checkpoint as code.
+
+## Install
 
 ```bash
-npx @rendotdev/lgtm git
+npm install --global @rendotdev/lgtm
+lgtm setup
 ```
 
-Available commands:
+`lgtm setup` adds the LGTM plugin and skill to Pi, Claude Code, and Codex. Set up only one integration with `--target pi`, `--target claude`, or `--target codex`.
+
+## Use it
+
+Review the current Git changes:
 
 ```bash
 lgtm git
+```
+
+LGTM opens the review in your browser. Switch between **Unified** and **Side by side** diff layouts, choose **LGTM** to approve, **Send comments** to return your feedback, or **Cancel** to stop. The agent gets the result and continues from there.
+
+Other useful commands:
+
+```bash
 lgtm worktree ../feature-worktree
-lgtm custom --input review.json
 lgtm document PLAN.md
-lgtm document --name "Implementation plan" < PLAN.md
+lgtm custom --input review.json
 lgtm finish
 lgtm stop
-lgtm mcp
-lgtm install
-lgtm install --target codex
 lgtm update
 ```
 
-Add `--json` for machine-readable command output and `--cwd <path>` to choose the review workspace.
+`lgtm update` updates the CLI and every installed agent integration. Add `--json` for machine-readable output, `--cwd <path>` to choose another workspace, or `--dry-run` to preview install and update commands.
 
-Run `lgtm install` to install LGTM's Pi extension, Claude Code plugin, Codex plugin, MCP configuration, and shared skill. Use `--target pi`, `--target claude`, or `--target codex` to install one integration. Add `--dry-run` to print the commands without running them.
+## Ask your agent
 
-Run `lgtm update` to update the globally installed LGTM CLI and refresh every installed LGTM integration. The CLI updates through the npm executable and prefix that own the active `lgtm` command. It also updates Pi's npm extension, Claude Code's marketplace and plugin, and Codex's marketplace snapshot. The same `--target`, `--dry-run`, and `--json` options are available. Local and `npx` runs skip the CLI update.
+LGTM works best as the final step in an agent task. Try a prompt like this:
 
-Custom reviews accept this JSON shape through `--input` or stdin:
-
-```json
-{
-  "name": "Authentication changes",
-  "files": [
-    {
-      "location": "src/auth.ts",
-      "oldContent": "export const enabled = false;\n",
-      "newContent": "export const enabled = true;\n"
-    }
-  ]
-}
+```text
+Make the change, test it, then use LGTM so I can review your work before you finish.
 ```
 
-Every review opens in the browser. **Send comments** completes it with `changes_requested`; **LGTM** completes it with `approved`; **Cancel** completes it with `canceled`. All three actions save the review and stop the local server. Canceling the originating CLI task also stops its server.
+The shared skill teaches agents how to open the right review and continue after your decision. The same npm package carries the CLI, browser app, Pi extension, Claude Code plugin, Codex plugin, MCP server, and skill.
 
-## Agent integrations
+## Manual agent setup
 
-The published npm package is the shared distribution for Pi, Claude Code, and Codex. It contains the prebuilt CLI and browser app, a shared LGTM skill, both plugin manifests, the Pi extension, and a local MCP server. Installation never needs to build LGTM on the user's machine.
+Most people only need `lgtm setup`. These commands are here when you want to set up one agent yourself.
 
 ### Pi
-
-After the npm package is published, install it in Pi:
 
 ```bash
 pi install npm:@rendotdev/lgtm
 ```
 
-The Pi extension registers:
-
-- `lgtm-open-git-review`
-- `lgtm-open-worktree-review`
-- `lgtm-open-custom-review`
-- `lgtm-open-document-review`
-- `lgtm-finish-review`
-
-The package also includes the `lgtm` skill. Invoke it explicitly when you want Pi to preserve the current task context across a human review checkpoint:
-
-```text
-/skill:lgtm Review this work before finishing.
-```
-
-Load a local checkout directly with:
-
-```bash
-pi -e /absolute/path/to/lgtm/src/interfaces/pi/lgtm.ts
-```
-
 ### Claude Code
-
-LGTM includes a Claude Code plugin manifest, the shared skill, and an MCP configuration. For local development, build the package and load the checkout directly:
-
-```bash
-vp run package
-claude plugin validate --strict .
-claude --plugin-dir .
-```
-
-The repository's `.claude-plugin/marketplace.json` exact-pins `@rendotdev/lgtm`. Once that version is published, install from the repository marketplace:
 
 ```bash
 claude plugin marketplace add https://github.com/rendotdev/lgtm
@@ -100,27 +67,16 @@ claude plugin install lgtm@rendotdev
 
 ### Codex
 
-LGTM includes a Codex plugin manifest, the shared skill, and a Codex-specific MCP configuration. The repository's `.agents/plugins/marketplace.json` exact-pins the same npm package version.
-
-After that version is published, add the marketplace, open `/plugins`, install LGTM, and start a new task:
-
 ```bash
-codex plugin marketplace add https://github.com/rendotdev/lgtm
-codex
+codex plugin marketplace add rendotdev/lgtm
+codex plugin add lgtm@rendotdev
 ```
 
-The MCP server exposes blocking, source-specific review tools. An open tool call waits until the browser review returns `approved`, `changes_requested`, or `canceled`, then stops the local review server and returns the structured result to the agent.
-
-- `open_git_review`
-- `open_worktree_review`
-- `open_custom_review`
-- `open_document_review`
-- `finish_review`
-- `stop_review`
+Start a new agent session after installing a plugin so it can load LGTM.
 
 ## Development
 
-LGTM uses [Vite+](https://viteplus.dev/) as its unified project toolchain, Node as its runtime, and npm as its package manager.
+LGTM uses [Vite+](https://viteplus.dev/), Node, and npm.
 
 ```bash
 vp install
@@ -128,17 +84,12 @@ vp dev
 vp check
 vp test
 vp run package
-vp run lgtm --help
-npm run metadata:check
+vp run lgtm -- git
 ```
 
-`vp dev` creates a temporary Git review API for the current workspace and starts Vite with hot reload. Set `LGTM_DEV_CWD=/path/to/repo` to review a different workspace while developing LGTM.
+`vp dev` starts the browser app with hot reload and uses the current workspace as its temporary review API. Set `LGTM_DEV_CWD=/path/to/repo` to review another workspace.
 
-`vp build` creates the reusable browser app in `dist/web`; `vp pack` bundles the Node CLI and Pi adapter. The cached `vp run package` task runs all builds and restores `dist` when its inputs have not changed. Reviews serve this prebuilt frontend, so opening one does not install dependencies or compile a new app.
-
-### Architecture
-
-Application code follows three tiers under `src`:
+The code has three tiers:
 
 ```text
 src/
@@ -147,20 +98,4 @@ src/
   platform/    Git, filesystem, process, HTTP, and browser integration
 ```
 
-Interfaces and platform code may depend on the domain. Domain code stays independent of both outer tiers. `vite.config.ts` is the development composition root that connects the tiers.
-
-`package.json` is the version source of truth. Run `npm run metadata:sync` after changing it, then commit the synchronized Claude manifest, Codex manifest, and marketplace pins together.
-
-Prepare a semantic release from a clean worktree with one of these commands:
-
-```bash
-npm run release:patch
-npm run release:minor
-npm run release:major
-```
-
-The release command runs the full validation pipeline, bumps `package.json` and `package-lock.json`, synchronizes both plugin manifests and marketplace pins, creates a `Release vX.Y.Z` commit, and creates the matching annotated tag. It does not push or publish. Preview the next version without changing anything with `npm run release:patch -- --dry-run`.
-
-## Release artifacts
-
-CI builds and smoke-tests the exact npm tarball without publishing it. A `v<package version>` tag creates a GitHub release containing the validated `.tgz` and its SHA-256 checksum. Publishing that tarball to npm is a separate manual step.
+Run `npm run metadata:sync` after changing the package version. To prepare a release, use `npm run release:patch`, `npm run release:minor`, or `npm run release:major`. The release script validates the project, updates plugin metadata, creates the release commit, and adds the matching tag. It leaves pushing and npm publication to you.
