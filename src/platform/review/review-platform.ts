@@ -36,6 +36,19 @@ type ReviewServerState = ReviewServerInfo & {
   startedAt: string;
 };
 
+type WebRootResolverParams = {};
+type WebRootResolverDeps = {
+  modulePath: () => string;
+  stat: (path: string) => Promise<unknown>;
+};
+
+type BuiltCliPathResolverParams = {
+  modulePath: string;
+};
+type BuiltCliPathResolverDeps = {
+  stat: (path: string) => Promise<unknown>;
+};
+
 class ReviewIdentifierClass {
   constructor(params: Record<string, never>, deps: Record<string, never>) {
     void params;
@@ -86,6 +99,52 @@ class ReviewServerLifecycleClass {
   }
 }
 
+export class WebRootResolverClass {
+  public constructor(
+    private readonly params: WebRootResolverParams,
+    private readonly deps: WebRootResolverDeps,
+  ) {}
+
+  public async resolve(): Promise<string> {
+    const modulePath = this.deps.modulePath();
+    const candidates = [
+      process.env.LGTM_WEB_ROOT,
+      resolve(modulePath, "..", "..", "..", "..", "dist", "web"),
+      resolve(modulePath, "..", "..", "dist", "web"),
+    ].filter((candidate): candidate is string => Boolean(candidate));
+
+    for (const candidate of candidates) {
+      try {
+        await this.deps.stat(join(candidate, "index.html"));
+        return candidate;
+      } catch {
+        // Try the next build location.
+      }
+    }
+    throw new Error("The LGTM frontend build is missing. Run `vp build` first.");
+  }
+}
+
+export class BuiltCliPathResolverClass {
+  public constructor(
+    private readonly params: BuiltCliPathResolverParams,
+    private readonly deps: BuiltCliPathResolverDeps,
+  ) {}
+
+  public async resolve(): Promise<string> {
+    const sourceReviewPlatformPath = `${sep}src${sep}platform${sep}review${sep}review-platform.ts`;
+    if (!this.params.modulePath.endsWith(sourceReviewPlatformPath)) return this.params.modulePath;
+
+    const cliPath = resolve(this.params.modulePath, "..", "..", "..", "..", "dist", "cli.mjs");
+    try {
+      await this.deps.stat(cliPath);
+      return cliPath;
+    } catch {
+      throw new Error("LGTM is not built. Run `vp check` and `vp run package` first.");
+    }
+  }
+}
+
 const activeReviewServersByPath = new Map<string, ReviewServerState>();
 const cleanupReviewServersByPath = new Map<string, ReviewServerState>();
 const abortCleanupByReviewPath = new Map<string, () => void>();
@@ -101,6 +160,14 @@ const reviewServerLifecycle = new ReviewServerLifecycleClass(
     readReviewServerState,
     stopReviewServerState,
   },
+);
+const WebRootResolver = new WebRootResolverClass(
+  {},
+  { modulePath: () => fileURLToPath(import.meta.url), stat },
+);
+const BuiltCliPathResolver = new BuiltCliPathResolverClass(
+  { modulePath: fileURLToPath(import.meta.url) },
+  { stat },
 );
 
 export type OpenReviewOptions = {
@@ -376,7 +443,7 @@ async function startReviewServer(
   signal?: AbortSignal,
   detached = true,
 ): Promise<ReviewServerInfo> {
-  const cliPath = await resolveCliPath();
+  const cliPath = await BuiltCliPathResolver.resolve();
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn("node", [cliPath, "serve", "--app-dir", appDir], {
       cwd: appDir,
@@ -458,21 +525,13 @@ async function startReviewServer(
   });
 }
 
-async function resolveCliPath() {
-  const modulePath = fileURLToPath(import.meta.url);
-  if (modulePath.endsWith(`${sep}src${sep}platform${sep}review${sep}review-platform.ts`)) {
-    return resolve(modulePath, "..", "..", "..", "interfaces", "cli", "cli.ts");
-  }
-  return modulePath;
-}
-
 export async function serveReviewApp(appDirInput: string): Promise<void> {
   const appDir = resolve(appDirInput);
   const payloadPath = join(appDir, "payload.json");
   const reviewPath = join(appDir, "review.json");
   const payload = await readJsonFile<ReviewPayload>(payloadPath);
   const preferencesPlatform = new LgtmPreferencesPlatformClass({ cwd: payload.cwd });
-  const webRoot = await resolveWebRoot();
+  const webRoot = await WebRootResolver.resolve();
 
   const server = createServer(async (request, response) => {
     try {
@@ -574,26 +633,6 @@ export async function serveReviewApp(appDirInput: string): Promise<void> {
       resolvePromise();
     });
   });
-}
-
-async function resolveWebRoot() {
-  const modulePath = fileURLToPath(import.meta.url);
-  const candidates = [
-    process.env.LGTM_WEB_ROOT,
-    resolve(modulePath, "..", "..", "..", "interfaces", "web"),
-    resolve(modulePath, "..", "..", "dist", "web"),
-    resolve(modulePath, "..", "..", "..", "..", "dist", "web"),
-  ].filter((candidate): candidate is string => Boolean(candidate));
-
-  for (const candidate of candidates) {
-    try {
-      await stat(join(candidate, "index.html"));
-      return candidate;
-    } catch {
-      // Try the next build location.
-    }
-  }
-  throw new Error("The LGTM frontend build is missing. Run `vp build` first.");
 }
 
 async function readJsonFile<T>(path: string): Promise<T> {

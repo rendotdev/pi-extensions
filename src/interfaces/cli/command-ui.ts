@@ -4,6 +4,8 @@ import { createElement, useEffect, useState } from "react";
 const brailleFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 type CommandUiState = "loading" | "success" | "error";
+type CommandUiRendererParams = {};
+type CommandUiRendererDeps = {};
 
 function CommandUi(props: { state: CommandUiState; label: string; detail?: string }) {
   const [frame, setFrame] = useState(0);
@@ -27,6 +29,11 @@ function CommandUi(props: { state: CommandUiState; label: string; detail?: strin
 }
 
 export class CommandUiRendererClass {
+  public constructor(
+    private readonly params: CommandUiRendererParams,
+    private readonly deps: CommandUiRendererDeps,
+  ) {}
+
   public async run<Result>(params: {
     label: string;
     execute: (report: (label: string) => void) => Promise<Result>;
@@ -69,10 +76,10 @@ export class CommandUiRendererClass {
       throw error;
     }
   }
+
+  public formatDetail(params: { lines: string[] }): string {
+    return params.lines.join("\n");
+  }
 }
 
-export const commandUiRenderer = new CommandUiRendererClass();
-
-export function renderCommandDetail(lines: string[]): string {
-  return lines.join("\n");
-}
+export const CommandUiRenderer = new CommandUiRendererClass({}, {});

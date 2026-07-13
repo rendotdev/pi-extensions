@@ -34,7 +34,7 @@
   ],
   "type": "module",
   "scripts": {
-    "lgtm": "node src/interfaces/cli/cli.ts",
+    "lgtm": "vp check && vp run package && node dist/cli.mjs",
     "metadata:check": "bun scripts/sync-plugin-metadata.ts --check",
     "metadata:sync": "bun scripts/sync-plugin-metadata.ts",
     "pack:dry": "npm pack --dry-run",

@@ -21,7 +21,7 @@ import { agentInstaller, agentUpdater } from "../../platform/install/agent-insta
 import { cliUpdater, type CliUpdateResult } from "../../platform/install/cli-update-platform.ts";
 import { runMcpServer } from "../mcp/mcp.ts";
 import { JsonReviewInputParser } from "./json-review-input.ts";
-import { commandUiRenderer, renderCommandDetail } from "./command-ui.ts";
+import { CommandUiRenderer } from "./command-ui.ts";
 
 const args = process.argv.slice(2);
 if (args[0] === "--") args.shift();
@@ -76,11 +76,13 @@ function reviewOptions(report: (label: string) => void) {
 }
 
 function formatPointer(pointer: ReviewPointer) {
-  return renderCommandDetail([
-    `LGTM review opened: ${pointer.name}`,
-    `URL: ${pointer.url}`,
-    `Review JSON: ${pointer.reviewPath}`,
-  ]);
+  return CommandUiRenderer.formatDetail({
+    lines: [
+      `LGTM review opened: ${pointer.name}`,
+      `URL: ${pointer.url}`,
+      `Review JSON: ${pointer.reviewPath}`,
+    ],
+  });
 }
 
 async function readStdin() {
@@ -135,7 +137,7 @@ function formatIntegrationResult(params: {
   if (params.skippedTargets?.length) {
     lines.push(`Skipped uninstalled integrations: ${params.skippedTargets.join(", ")}.`);
   }
-  return renderCommandDetail(lines);
+  return CommandUiRenderer.formatDetail({ lines });
 }
 
 async function runCommand<Result>(params: {
@@ -149,7 +151,7 @@ async function runCommand<Result>(params: {
     return result;
   }
   try {
-    return await commandUiRenderer.run(params);
+    return await CommandUiRenderer.run(params);
   } catch (error) {
     commandErrorRendered = true;
     throw error;

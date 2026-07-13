@@ -100,9 +100,9 @@ LGTM uses [Vite+](https://viteplus.dev/), Node, and npm.
 vp install
 vp dev
 vp check
-vp test
 vp run package
-vp run lgtm
+vp test
+npm run lgtm -- --help
 ```
 
 `vp dev` starts the browser app with hot reload and uses the current workspace as its temporary review API. Set `LGTM_DEV_CWD=/path/to/repo` to review another workspace.

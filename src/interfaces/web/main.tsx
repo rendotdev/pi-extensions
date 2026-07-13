@@ -15,7 +15,6 @@ import {
   TextArea,
   Toast,
   Tooltip,
-  toast,
   Typography,
 } from "@heroui/react";
 import {
@@ -50,9 +49,10 @@ import DiffsWorker from "@pierre/diffs/worker/worker.js?worker";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { DiffStyle, LgtmPreferences } from "../../domain/preferences/preferences.ts";
+import { ReviewHandoff } from "../../domain/review/review-handoff.ts";
 import { CommentDraft } from "./comment-draft.ts";
 import { preferencesApi } from "./preferences-api.ts";
-import { ReviewHandoff } from "./review-handoff.ts";
+import { ToastNotifications } from "./toast-notifications.ts";
 import { ReviewWindowTitle } from "./window-title.ts";
 
 type ReviewSourceFile = {
@@ -160,11 +160,6 @@ type AppState = {
 type CommentAnnotationMetadata = {
   commentId: string;
 };
-
-function errorDescription(error: unknown, fallback: string) {
-  if (!(error instanceof Error) || error.message === "Failed to fetch") return fallback;
-  return error.message;
-}
 
 function makeId() {
   if (window.crypto && typeof window.crypto.randomUUID === "function")
@@ -323,14 +318,12 @@ function App() {
       queryClient.setQueryData(["preferences"], preferences);
       return { previousPreferences };
     },
-    onError: (error, _preferences, context) => {
+    onError: (_error, _preferences, context) => {
       queryClient.setQueryData(
         ["preferences"],
         context?.previousPreferences ?? { diffStyle: "unified" },
       );
-      toast.danger("Unable to save LGTM preferences", {
-        description: errorDescription(error, "Check that the review server is still running."),
-      });
+      ToastNotifications.preferencesNotSaved();
     },
     onSuccess: (preferences) => {
       queryClient.setQueryData(["preferences"], preferences);
@@ -340,12 +333,7 @@ function App() {
 
   useEffect(() => {
     if (!preferencesQuery.error) return;
-    toast.danger("Unable to load LGTM preferences", {
-      description: errorDescription(
-        preferencesQuery.error,
-        "The review will use the unified diff layout.",
-      ),
-    });
+    ToastNotifications.preferencesUnavailable();
   }, [preferencesQuery.error]);
 
   useEffect(() => {
@@ -361,14 +349,9 @@ function App() {
         setCollapsedFileIds(getDefaultCollapsedFileIds(nextState));
         setState(nextState);
       })
-      .catch((loadError) => {
+      .catch(() => {
         if (cancelled) return;
-        toast.danger("Unable to load the review", {
-          description: errorDescription(
-            loadError,
-            "Check that the review server is still running.",
-          ),
-        });
+        ToastNotifications.reviewUnavailable();
       });
     return () => {
       cancelled = true;
@@ -403,13 +386,8 @@ function App() {
     },
     {
       wait: 400,
-      onError: (saveError) => {
-        toast.danger("Unable to save your comments", {
-          description: errorDescription(
-            saveError,
-            "Check that the review server is still running.",
-          ),
-        });
+      onError: () => {
+        ToastNotifications.commentsNotSaved();
       },
     },
     (saveState) => ({ isExecuting: saveState.isExecuting }),
@@ -585,20 +563,13 @@ function App() {
     setRecoveryStatus(null);
     try {
       await navigator.clipboard.writeText(
-        decision === "approved" ? "approved" : `PTAL: ${state.payload.reviewPath}`,
+        ReviewHandoff.clipboardText({ decision, review: state.review }),
       );
       setCopiedReviewPath(true);
-    } catch (clipboardError) {
+    } catch {
       setIsFinishing(false);
       setCopiedReviewPath(false);
-      toast.danger("Unable to copy the review handoff", {
-        description: errorDescription(
-          clipboardError,
-          decision === "approved"
-            ? "Copy approved and send it to the agent."
-            : "Copy the review JSON path and prefix it with PTAL: before sending it to the agent.",
-        ),
-      });
+      ToastNotifications.copyFailed();
       return;
     }
     try {
@@ -625,7 +596,7 @@ function App() {
       setIsFinishing(false);
       setCopiedReviewPath(false);
       try {
-        await navigator.clipboard.writeText(ReviewHandoff.recoveryText(state.review));
+        await navigator.clipboard.writeText(ReviewHandoff.fallbackText({ review: state.review }));
         setRecoveryStatus("Comments copied");
       } catch {
         setRecoveryStatus("Comments kept in this tab");
@@ -647,14 +618,9 @@ function App() {
         document.body.innerHTML =
           '<main style="font-family: system-ui, sans-serif; padding: 2rem; color: #111827;"><h1>Review canceled</h1><p>You can close this tab.</p></main>';
       }, 250);
-    } catch (cancelError) {
+    } catch {
       setIsFinishing(false);
-      toast.danger("Unable to cancel the review", {
-        description: errorDescription(
-          cancelError,
-          "Check that the review server is still running.",
-        ),
-      });
+      ToastNotifications.cancelFailed();
     }
   }
 
