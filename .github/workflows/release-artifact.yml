@@ -110,7 +110,11 @@ jobs:
         run: sha256sum --check artifacts/*.sha256
 
       - name: Publish npm package
-        run: npm publish artifacts/*.tgz --access public
+        shell: bash
+        run: |
+          tarball=$(find artifacts -type f -name '*.tgz' -print -quit)
+          test -n "$tarball"
+          npm publish "$tarball" --access public
 
       - name: Attach artifact to GitHub release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
