@@ -75,7 +75,7 @@ jobs:
         run: |
           install_dir=$(mktemp -d)
           npm install --prefix "$install_dir" --ignore-scripts --no-audit --no-fund \
-            "${{ steps.pack.outputs.tarball }}"
+            "$GITHUB_WORKSPACE/${{ steps.pack.outputs.tarball }}"
           "$install_dir/node_modules/.bin/lgtm" --help
           "$install_dir/node_modules/.bin/lgtm" mcp </dev/null
 
