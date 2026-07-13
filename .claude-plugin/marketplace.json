@@ -11,15 +11,18 @@
       "source": {
         "source": "npm",
         "package": "@rendotdev/lgtm",
-        "version": "0.1.3"
+        "version": "0.1.4"
       },
       "description": "Human approval for agent work, with code diff and Markdown review.",
-      "version": "0.1.3",
+      "version": "0.1.4",
       "author": {
         "name": "René-Pier Deshaies-Gélinas"
       },
       "category": "Development",
-      "tags": ["code-review", "human-in-the-loop"],
+      "tags": [
+        "code-review",
+        "human-in-the-loop"
+      ],
       "strict": true
     }
   ]
