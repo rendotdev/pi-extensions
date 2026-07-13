@@ -17,7 +17,7 @@ afterEach(async () => {
 async function makePlatform() {
   const cwd = await mkdtemp(join(tmpdir(), "lgtm-preferences-"));
   temporaryDirectories.push(cwd);
-  return { cwd, platform: new LgtmPreferencesPlatformClass({ cwd }) };
+  return { cwd, platform: new LgtmPreferencesPlatformClass({ cwd }, {}) };
 }
 
 describe("LgtmPreferencesPlatformClass", () => {

@@ -1,5 +1,6 @@
 import { Text, render } from "ink";
 import { createElement, useEffect, useState } from "react";
+import { DomainClass } from "../../domain/domain-class.ts";
 
 const brailleFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -28,12 +29,10 @@ function CommandUi(props: { state: CommandUiState; label: string; detail?: strin
   );
 }
 
-export class CommandUiRendererClass {
-  public constructor(
-    private readonly params: CommandUiRendererParams,
-    private readonly deps: CommandUiRendererDeps,
-  ) {}
-
+export class CommandUiRendererClass extends DomainClass<
+  CommandUiRendererParams,
+  CommandUiRendererDeps
+> {
   public async run<Result>(params: {
     label: string;
     execute: (report: (label: string) => void) => Promise<Result>;

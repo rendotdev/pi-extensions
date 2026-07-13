@@ -5,6 +5,7 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { resolve } from "node:path";
+import { DomainClass } from "../../domain/domain-class.ts";
 import {
   collectGitReviewFiles,
   finishReview,
@@ -28,9 +29,7 @@ type LgtmPiExtensionDependencies = {
   stopReviews: typeof stopReviews;
 };
 
-export class LgtmPiExtensionClass {
-  public constructor(private readonly deps: LgtmPiExtensionDependencies) {}
-
+export class LgtmPiExtensionClass extends DomainClass<{}, LgtmPiExtensionDependencies> {
   public register(pi: ExtensionAPI) {
     pi.registerTool(this.createOpenGitReviewTool(pi));
     pi.registerTool(this.createOpenWorktreeReviewTool(pi));
@@ -112,17 +111,17 @@ export class LgtmPiExtensionClass {
       promptSnippet:
         "lgtm-open-git-review: Present current Git changes for human review and approval.",
       promptGuidelines: [
-        "Use lgtm-open-git-review only after the current checkout changes are ready and validated; wait for its automatic review follow-up before continuing.",
+        "Use lgtm-open-git-review only after the current checkout changes are ready and validated. Provide a concise, task-specific name and wait for its automatic review follow-up before continuing.",
       ],
       executionMode: "sequential",
       parameters: Type.Object({
-        name: Type.Optional(Type.String({ description: "Review name. Defaults to Git review." })),
+        name: Type.String({ description: "Concise, task-specific review name." }),
       }),
       execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
         const files = await this.deps.collectGitReviewFiles(ctx.cwd, signal);
         return this.openFromPi(pi, ctx, signal, {
           kind: "diff",
-          name: params.name ?? "Git review",
+          name: params.name,
           files,
         });
       },
@@ -253,12 +252,15 @@ export class LgtmPiExtensionClass {
   }
 }
 
-export const LgtmPiExtension = new LgtmPiExtensionClass({
-  collectGitReviewFiles,
-  finishReview,
-  openReview,
-  resolvePath: resolve,
-  stopReviews,
-});
+export const LgtmPiExtension = new LgtmPiExtensionClass(
+  {},
+  {
+    collectGitReviewFiles,
+    finishReview,
+    openReview,
+    resolvePath: resolve,
+    stopReviews,
+  },
+);
 
 export default LgtmPiExtension.register.bind(LgtmPiExtension);

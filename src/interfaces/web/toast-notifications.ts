@@ -1,11 +1,10 @@
 import { toast } from "@heroui/react";
+import { DomainClass } from "../../domain/domain-class.ts";
 
-export class ToastNotificationsClass {
-  public constructor(
-    private readonly _params: {},
-    private readonly deps: { showDanger: (message: string) => unknown },
-  ) {}
-
+export class ToastNotificationsClass extends DomainClass<
+  {},
+  { showDanger: (message: string) => unknown }
+> {
   public preferencesNotSaved(): void {
     void this.deps.showDanger("Preferences not saved");
   }

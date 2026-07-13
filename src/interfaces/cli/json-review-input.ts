@@ -1,4 +1,5 @@
 import { z } from "zod/mini";
+import { DomainClass } from "../../domain/domain-class.ts";
 import type { DiffReviewFileInput } from "../../domain/review/review.ts";
 
 const fileSchema = z.object({
@@ -21,7 +22,7 @@ export type JsonReviewInput = {
   files: DiffReviewFileInput[];
 };
 
-export class JsonReviewInputParserClass {
+export class JsonReviewInputParserClass extends DomainClass<{}, {}> {
   public parse(params: { value: unknown }): JsonReviewInput {
     const result = Array.isArray(params.value)
       ? filesSchema.safeParse(params.value)
@@ -45,4 +46,4 @@ export class JsonReviewInputParserClass {
   }
 }
 
-export const JsonReviewInputParser = new JsonReviewInputParserClass();
+export const JsonReviewInputParser = new JsonReviewInputParserClass({}, {});

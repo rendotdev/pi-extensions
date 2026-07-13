@@ -2,4 +2,5 @@
 - Use `lgtm review` to open a review of the current Git changes. Use `lgtm review worktree`, `lgtm review document`, or `lgtm review json` for other review sources.
 - Use `lgtm review result` to read the latest review outcome and stop its server. Treat `approved`, `changes_requested`, and `canceled` as the only review outcomes; never use bare `lgtm` as a review command or `LGTM` as an outcome.
 - Put reusable behavior in classes ending with `Class`. Every class constructor takes `params` as its first object argument and `deps` as its second object argument, including empty `{}` objects. Keep module-level helpers out of application code; React component functions may remain functions when hooks require them.
+- All application classes must inherit from `DomainClass`, or from an approved specialized base class that inherits from it. Use its `protected readonly params` and `deps` constructor shortcuts instead of redeclaring those fields.
 - Vite+ is the source execution pipeline. Run `vp check`, then `vp run package`, before running LGTM. Run the generated `dist/cli.mjs` with Node; never execute source TypeScript with Node directly.

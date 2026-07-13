@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { ReviewWindowTitleClass } from "./window-title.ts";
 
 describe("ReviewWindowTitleClass", () => {
-  const title = new ReviewWindowTitleClass();
+  const title = new ReviewWindowTitleClass({}, {});
 
   it.each([
     ["/Users/rene/GitHub/lgtm", "Review preferences", "lgtm / Review preferences"],

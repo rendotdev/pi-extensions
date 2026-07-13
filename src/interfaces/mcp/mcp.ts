@@ -64,6 +64,7 @@ export const mcpTools: McpTool[] = [
     inputSchema: {
       type: "object",
       properties: commonProperties,
+      required: ["name"],
       additionalProperties: false,
     },
   },
@@ -245,11 +246,10 @@ export function createMcpToolHandler(dependencies: McpRuntimeDependencies = defa
             })();
     const cwd = resolve(optionalString(args, "cwd") ?? process.cwd());
     const reviewName = optionalString(args, "name");
-
     if (name === "open_git_review") {
       const files = await dependencies.collectGitReviewFiles(cwd, signal);
       return await openBlockingReview(
-        { kind: "diff", name: reviewName ?? "Git review", files },
+        { kind: "diff", name: requiredString(args, "name"), files },
         cwd,
         signal,
       );

@@ -5,6 +5,7 @@ import {
   type AgentInstallStep,
   type AgentInstallTarget,
 } from "../../domain/install/agent-install.ts";
+import { DomainClass } from "../../domain/domain-class.ts";
 
 type AgentInstallDependencies = {
   runCommand: (step: AgentInstallStep) => Promise<void>;
@@ -19,13 +20,7 @@ export type AgentUpdateResult = {
   skippedTargets: Exclude<AgentInstallTarget, "all">[];
 };
 
-export class AgentInstallerClass {
-  private readonly deps: AgentInstallDependencies;
-
-  public constructor(deps: AgentInstallDependencies) {
-    this.deps = deps;
-  }
-
+export class AgentInstallerClass extends DomainClass<{}, AgentInstallDependencies> {
   public async install(params: { target: AgentInstallTarget }): Promise<AgentInstallStep[]> {
     const steps = agentInstallPlanner.createPlan(params);
     for (const step of steps) await this.deps.runCommand(step);
@@ -45,15 +40,9 @@ async function runCommand(step: AgentInstallStep): Promise<void> {
   });
 }
 
-export const agentInstaller = new AgentInstallerClass({ runCommand });
+export const agentInstaller = new AgentInstallerClass({}, { runCommand });
 
-export class AgentUpdaterClass {
-  private readonly deps: AgentUpdateDependencies;
-
-  public constructor(deps: AgentUpdateDependencies) {
-    this.deps = deps;
-  }
-
+export class AgentUpdaterClass extends DomainClass<{}, AgentUpdateDependencies> {
   public async update(params: { target: AgentInstallTarget }): Promise<AgentUpdateResult> {
     const targets =
       params.target === "all" ? (["pi", "claude", "codex"] as const) : [params.target];
@@ -109,4 +98,4 @@ async function readCommand(params: { command: string; args: string[] }): Promise
   });
 }
 
-export const agentUpdater = new AgentUpdaterClass({ runCommand, readCommand });
+export const agentUpdater = new AgentUpdaterClass({}, { runCommand, readCommand });

@@ -78,6 +78,9 @@ describe("LGTM MCP tools", () => {
     expect(mcpTools.find((tool) => tool.name === "finish_review")?.inputSchema).toEqual(
       expect.objectContaining({ required: ["reviewPath"] }),
     );
+    expect(mcpTools.find((tool) => tool.name === "open_git_review")?.inputSchema).toEqual(
+      expect.objectContaining({ required: ["name"] }),
+    );
   });
 
   it("keeps an open Git tool call pending through waitForReview and returns the decision", async () => {

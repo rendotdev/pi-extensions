@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
 import { extname, join, resolve, sep } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { DomainClass } from "../../domain/domain-class.ts";
 import {
   reviewBuilder,
   reviewFormatter,
@@ -16,8 +17,9 @@ import {
   type ReviewPayload,
   type ReviewPointer,
 } from "../../domain/review/review.ts";
-import { lgtmPreferences } from "../../domain/preferences/preferences.ts";
 import { LgtmPreferencesPlatformClass } from "../preferences/preferences-platform.ts";
+import { ReviewApiRouterClass } from "./api/review-api-router.ts";
+import { reviewPayloadSchema } from "./api/api-schemas.ts";
 
 type CommandResult = {
   stdout: string;
@@ -49,25 +51,21 @@ type BuiltCliPathResolverDeps = {
   stat: (path: string) => Promise<unknown>;
 };
 
-class ReviewIdentifierClass {
-  constructor(params: Record<string, never>, deps: Record<string, never>) {
-    void params;
-    void deps;
-  }
-
+class ReviewIdentifierClass extends DomainClass<Record<string, never>, Record<string, never>> {
   public sanitizePathSegment(params: { value: string }): string {
     return params.value.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 160) || randomUUID();
   }
 }
 
-class ReviewServerLifecycleClass {
-  private readonly deps: {
+class ReviewServerLifecycleClass extends DomainClass<
+  Record<string, never>,
+  {
     activeReviewServersByPath: Map<string, ReviewServerState>;
     readReviewServerPid: (appDir: string) => Promise<number | undefined>;
     readReviewServerState: (appDir: string) => Promise<ReviewServerState | undefined>;
     stopReviewServerState: (state: ReviewServerState, reviewPath?: string) => Promise<boolean>;
-  };
-
+  }
+> {
   constructor(
     params: Record<string, never>,
     deps: {
@@ -77,8 +75,7 @@ class ReviewServerLifecycleClass {
       stopReviewServerState: (state: ReviewServerState, reviewPath?: string) => Promise<boolean>;
     },
   ) {
-    void params;
-    this.deps = deps;
+    super(params, deps);
   }
 
   public async stopForReview(params: { review: ReviewJson; reviewPath: string }): Promise<boolean> {
@@ -99,12 +96,7 @@ class ReviewServerLifecycleClass {
   }
 }
 
-export class WebRootResolverClass {
-  public constructor(
-    private readonly params: WebRootResolverParams,
-    private readonly deps: WebRootResolverDeps,
-  ) {}
-
+export class WebRootResolverClass extends DomainClass<WebRootResolverParams, WebRootResolverDeps> {
   public async resolve(): Promise<string> {
     const modulePath = this.deps.modulePath();
     const candidates = [
@@ -125,12 +117,10 @@ export class WebRootResolverClass {
   }
 }
 
-export class BuiltCliPathResolverClass {
-  public constructor(
-    private readonly params: BuiltCliPathResolverParams,
-    private readonly deps: BuiltCliPathResolverDeps,
-  ) {}
-
+export class BuiltCliPathResolverClass extends DomainClass<
+  BuiltCliPathResolverParams,
+  BuiltCliPathResolverDeps
+> {
   public async resolve(): Promise<string> {
     const sourceReviewPlatformPath = `${sep}src${sep}platform${sep}review${sep}review-platform.ts`;
     if (!this.params.modulePath.endsWith(sourceReviewPlatformPath)) return this.params.modulePath;
@@ -529,95 +519,35 @@ export async function serveReviewApp(appDirInput: string): Promise<void> {
   const appDir = resolve(appDirInput);
   const payloadPath = join(appDir, "payload.json");
   const reviewPath = join(appDir, "review.json");
-  const payload = await readJsonFile<ReviewPayload>(payloadPath);
-  const preferencesPlatform = new LgtmPreferencesPlatformClass({ cwd: payload.cwd });
+  const payload = reviewPayloadSchema.parse(await readJsonFile<ReviewPayload>(payloadPath));
+  const preferencesPlatform = new LgtmPreferencesPlatformClass({ cwd: payload.cwd }, {});
   const webRoot = await WebRootResolver.resolve();
+  let server: ReturnType<typeof createServer>;
+  const apiRouter = new ReviewApiRouterClass(
+    { payloadPath, reviewPath },
+    {
+      preferencesPlatform,
+      closeServer: () => {
+        server.close(() => process.exit(0));
+        const forceExit = setTimeout(() => process.exit(0), 1_000);
+        forceExit.unref();
+      },
+    },
+  );
 
-  const server = createServer(async (request, response) => {
+  server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
 
-      if (url.pathname === "/api/payload" && request.method === "GET") {
-        return await sendJsonFile(response, payloadPath);
-      }
-
-      if (url.pathname === "/api/review" && request.method === "GET") {
-        return await sendJsonFile(response, reviewPath);
-      }
-
-      if (url.pathname === "/api/review" && request.method === "PUT") {
-        const review = await readRequestJson<ReviewJson>(request);
-        const nextReview = { ...review, updatedAt: new Date().toISOString() };
-        await writeJsonFile(reviewPath, nextReview);
-        return sendJson(response, 200, nextReview);
-      }
-
-      if (url.pathname === "/api/preferences" && request.method === "GET") {
-        return sendJson(response, 200, await preferencesPlatform.read());
-      }
-
-      if (url.pathname === "/api/preferences" && request.method === "PUT") {
-        const body = await readRequestJson<unknown>(request);
-        let preferences;
-        try {
-          preferences = lgtmPreferences.parse({ value: body });
-        } catch (error) {
-          return sendJson(response, 400, {
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-        return sendJson(response, 200, await preferencesPlatform.write({ preferences }));
-      }
-
-      if (url.pathname === "/api/finish" && request.method === "POST") {
-        const body = await readRequestJson<{ decision?: unknown }>(request);
-        if (body.decision !== "approved" && body.decision !== "changes_requested") {
-          return sendJson(response, 400, { error: "Invalid review decision." });
-        }
-        const review = await readJsonFile<ReviewJson>(reviewPath);
-        const now = new Date().toISOString();
-        const nextReview = {
-          ...review,
-          status: body.decision,
-          updatedAt: now,
-          finishedAt: now,
-        };
-        await writeJsonFile(reviewPath, nextReview);
-        sendJson(response, 200, nextReview);
-        setTimeout(() => process.exit(0), 300);
-        return;
-      }
-
-      if (url.pathname === "/api/cancel" && request.method === "POST") {
-        const review = await readJsonFile<ReviewJson>(reviewPath);
-        const now = new Date().toISOString();
-        const nextReview = {
-          ...review,
-          status: "canceled" as const,
-          updatedAt: now,
-          finishedAt: now,
-          files: review.files.map((file) => ({ ...file, comments: [] })),
-          documentComments: [],
-        };
-        await writeJsonFile(reviewPath, nextReview);
-        sendJson(response, 200, nextReview);
-        setTimeout(() => process.exit(0), 300);
-        return;
-      }
-
-      if (url.pathname === "/health" && request.method === "GET") {
-        return sendJson(response, 200, { ok: true });
-      }
+      if (await apiRouter.handle({ request, response, url })) return;
 
       if (request.method === "GET") {
         return await sendStaticFile(response, webRoot, url.pathname);
       }
 
-      sendJson(response, 404, { error: "Not found." });
+      apiRouter.sendError({ response, status: 404, error: "Not found." });
     } catch (error) {
-      sendJson(response, 500, {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      apiRouter.sendError({ response, status: 400, error });
     }
   });
 
@@ -637,32 +567,6 @@ export async function serveReviewApp(appDirInput: string): Promise<void> {
 
 async function readJsonFile<T>(path: string): Promise<T> {
   return JSON.parse(await readFile(path, "utf8")) as T;
-}
-
-async function writeJsonFile(path: string, value: unknown) {
-  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-}
-
-async function readRequestJson<T>(request: IncomingMessage): Promise<T> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += buffer.length;
-    if (size > 10 * 1024 * 1024) throw new Error("Request body is too large.");
-    chunks.push(buffer);
-  }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as T;
-}
-
-async function sendJsonFile(response: ServerResponse, path: string) {
-  const body = await readFile(path);
-  response.writeHead(200, {
-    "content-type": "application/json; charset=utf-8",
-    "content-length": body.length,
-    "cache-control": "no-store",
-  });
-  response.end(body);
 }
 
 function sendJson(response: ServerResponse, status: number, value: unknown) {
@@ -702,6 +606,7 @@ function contentTypeForPath(path: string) {
     ".html": "text/html; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
     ".map": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
     ".woff2": "font/woff2",
   };
   return contentTypes[extname(path).toLowerCase()] ?? "application/octet-stream";

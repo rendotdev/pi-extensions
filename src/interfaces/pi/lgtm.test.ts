@@ -22,24 +22,27 @@ describe("LgtmPiExtensionClass", () => {
       },
     } as unknown as ExtensionAPI;
     const finishReview = vi.fn(async () => ({ found: false as const }));
-    const extension = new LgtmPiExtensionClass({
-      collectGitReviewFiles: vi.fn(async () => []),
-      finishReview,
-      openReview: vi.fn(async (_input, options) => {
-        reviewOptions = options;
-        return {
-          name: "Skill draft",
-          sessionId: "session-1",
-          reviewUUID: "review-1",
-          reviewId: "session-1-review-1",
-          appDir: "/tmp/project/.lgtm/session-1-review-1",
-          url: "http://localhost:12345/",
-          reviewPath: "/tmp/project/.lgtm/session-1-review-1/review.json",
-        };
-      }),
-      resolvePath: resolve,
-      stopReviews: vi.fn(async () => false),
-    });
+    const extension = new LgtmPiExtensionClass(
+      {},
+      {
+        collectGitReviewFiles: vi.fn(async () => []),
+        finishReview,
+        openReview: vi.fn(async (_input, options) => {
+          reviewOptions = options;
+          return {
+            name: "Skill draft",
+            sessionId: "session-1",
+            reviewUUID: "review-1",
+            reviewId: "session-1-review-1",
+            appDir: "/tmp/project/.lgtm/session-1-review-1",
+            url: "http://localhost:12345/",
+            reviewPath: "/tmp/project/.lgtm/session-1-review-1/review.json",
+          };
+        }),
+        resolvePath: resolve,
+        stopReviews: vi.fn(async () => false),
+      },
+    );
 
     extension.register(pi);
 

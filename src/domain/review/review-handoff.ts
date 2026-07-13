@@ -1,3 +1,5 @@
+import { DomainClass } from "../domain-class.ts";
+
 type HandoffComment = {
   selectedText: string;
   startLine: number | null;
@@ -17,12 +19,7 @@ type HandoffReview = {
   documentComments: HandoffComment[];
 };
 
-export class ReviewHandoffClass {
-  public constructor(params: {}, deps: {}) {
-    void params;
-    void deps;
-  }
-
+export class ReviewHandoffClass extends DomainClass<{}, {}> {
   public clipboardText(params: {
     decision: "approved" | "changes_requested";
     review: HandoffReview;

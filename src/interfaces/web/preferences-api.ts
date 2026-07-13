@@ -1,12 +1,7 @@
+import { DomainClass } from "../../domain/domain-class.ts";
 import type { LgtmPreferences } from "../../domain/preferences/preferences.ts";
 
-export class PreferencesApiClass {
-  private readonly deps: { fetch: typeof fetch };
-
-  constructor(deps: { fetch: typeof fetch } = { fetch }) {
-    this.deps = deps;
-  }
-
+export class PreferencesApiClass extends DomainClass<{}, { fetch: typeof fetch }> {
   public async get(): Promise<LgtmPreferences> {
     const response = await this.deps.fetch("/api/preferences");
     if (!response.ok) throw new Error(await response.text());
@@ -24,4 +19,4 @@ export class PreferencesApiClass {
   }
 }
 
-export const preferencesApi = new PreferencesApiClass();
+export const preferencesApi = new PreferencesApiClass({}, { fetch });

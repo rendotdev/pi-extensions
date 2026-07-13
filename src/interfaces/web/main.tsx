@@ -16,6 +16,7 @@ import {
   Toast,
   Tooltip,
   Typography,
+  useTheme,
 } from "@heroui/react";
 import {
   Check,
@@ -23,6 +24,9 @@ import {
   ChevronsUpDown,
   Copy as CopyIcon,
   MessageSquarePlus,
+  Monitor,
+  Moon,
+  Sun,
   Trash2,
   X,
 } from "lucide-react";
@@ -189,6 +193,24 @@ async function saveReview(review: ReviewJson): Promise<ReviewJson> {
   return (await response.json()) as ReviewJson;
 }
 
+async function finishReviewRequest(
+  decision: "approved" | "changes_requested",
+): Promise<ReviewJson> {
+  const response = await fetch("/api/finish", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ decision }),
+  });
+  if (!response.ok) throw new Error(await response.text());
+  return (await response.json()) as ReviewJson;
+}
+
+async function cancelReviewRequest(): Promise<ReviewJson> {
+  const response = await fetch("/api/cancel", { method: "POST" });
+  if (!response.ok) throw new Error(await response.text());
+  return (await response.json()) as ReviewJson;
+}
+
 function reviewCommentCount(review: ReviewJson) {
   if (review.kind === "document") {
     return review.documentComments.filter((comment) => comment.comment.trim().length > 0).length;
@@ -293,6 +315,7 @@ function getDefaultCollapsedFileIds(state: AppState) {
 }
 
 function App() {
+  const { resolvedTheme, setTheme, theme } = useTheme("system");
   const queryClient = useQueryClient();
   const [state, setState] = useState<AppState | null>(null);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
@@ -329,7 +352,17 @@ function App() {
       queryClient.setQueryData(["preferences"], preferences);
     },
   });
+  const reviewStateQuery = useQuery({
+    queryKey: ["review-state"],
+    queryFn: loadState,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  const reviewSaveMutation = useMutation({ mutationFn: saveReview });
+  const finishReviewMutation = useMutation({ mutationFn: finishReviewRequest });
+  const cancelReviewMutation = useMutation({ mutationFn: cancelReviewRequest });
   const diffStyle = preferencesQuery.data?.diffStyle ?? "unified";
+  const diffThemeType = resolvedTheme === "dark" ? "dark" : "light";
+  const diffTheme = diffThemeType === "dark" ? "github-dark" : "github-light";
 
   useEffect(() => {
     if (!preferencesQuery.error) return;
@@ -337,26 +370,21 @@ function App() {
   }, [preferencesQuery.error]);
 
   useEffect(() => {
-    let cancelled = false;
-    loadState()
-      .then((nextState) => {
-        if (cancelled) return;
-        lastSavedSignature.current = meaningfulReviewSignature(nextState.review);
-        document.title = ReviewWindowTitle.format({
-          cwd: nextState.payload.cwd,
-          name: nextState.payload.name,
-        });
-        setCollapsedFileIds(getDefaultCollapsedFileIds(nextState));
-        setState(nextState);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        ToastNotifications.reviewUnavailable();
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (!reviewStateQuery.data) return;
+    const nextState = reviewStateQuery.data;
+    lastSavedSignature.current = meaningfulReviewSignature(nextState.review);
+    document.title = ReviewWindowTitle.format({
+      cwd: nextState.payload.cwd,
+      name: nextState.payload.name,
+    });
+    setCollapsedFileIds(getDefaultCollapsedFileIds(nextState));
+    setState(nextState);
+  }, [reviewStateQuery.data]);
+
+  useEffect(() => {
+    if (!reviewStateQuery.error) return;
+    ToastNotifications.reviewUnavailable();
+  }, [reviewStateQuery.error]);
 
   const isLoaded = state !== null;
   useLayoutEffect(() => {
@@ -379,7 +407,7 @@ function App() {
 
   const saveDebouncer = useAsyncDebouncer(
     async (review: ReviewJson) => {
-      const savedReview = await saveReview(review);
+      const savedReview = await reviewSaveMutation.mutateAsync(review);
       lastSavedSignature.current = meaningfulReviewSignature(savedReview);
       setLastSavedAt(new Date());
       return savedReview;
@@ -392,7 +420,7 @@ function App() {
     },
     (saveState) => ({ isExecuting: saveState.isExecuting }),
   );
-  const isSaving = saveDebouncer.state.isExecuting;
+  const isSaving = saveDebouncer.state.isExecuting || reviewSaveMutation.isPending;
 
   const queueSave = useCallback(
     (review: ReviewJson) => {
@@ -572,26 +600,10 @@ function App() {
       ToastNotifications.copyFailed();
       return;
     }
+    saveDebouncer.cancel();
     try {
-      saveDebouncer.cancel();
-      const reviewToFinish = await saveReview(state.review);
-      lastSavedSignature.current = meaningfulReviewSignature(reviewToFinish);
-      const response = await fetch("/api/finish", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ decision }),
-      });
-      if (!response.ok) throw new Error(await response.text());
-      const finishedReview = (await response.json()) as ReviewJson;
-      setState((current) => (current ? { ...current, review: finishedReview } : current));
-      window.setTimeout(() => {
-        window.close();
-        const heading = decision === "approved" ? "Approved" : "Comments sent";
-        document.body.innerHTML =
-          '<main style="font-family: system-ui, sans-serif; padding: 2rem; color: #111827;"><h1>' +
-          heading +
-          "</h1><p>You can close this tab.</p></main>";
-      }, 250);
+      const savedReview = await reviewSaveMutation.mutateAsync(state.review);
+      lastSavedSignature.current = meaningfulReviewSignature(savedReview);
     } catch {
       setIsFinishing(false);
       setCopiedReviewPath(false);
@@ -601,6 +613,19 @@ function App() {
       } catch {
         setRecoveryStatus("Comments kept in this tab");
       }
+      return;
+    }
+    try {
+      const finishedReview = await finishReviewMutation.mutateAsync(decision);
+      setState((current) => (current ? { ...current, review: finishedReview } : current));
+      window.close();
+      window.setTimeout(() => {
+        window.close();
+      }, 50);
+    } catch {
+      setIsFinishing(false);
+      setCopiedReviewPath(false);
+      setRecoveryStatus("Review saved but not finished");
     }
   }
 
@@ -609,9 +634,7 @@ function App() {
     setIsFinishing(true);
     saveDebouncer.cancel();
     try {
-      const response = await fetch("/api/cancel", { method: "POST" });
-      if (!response.ok) throw new Error(await response.text());
-      const canceledReview = (await response.json()) as ReviewJson;
+      const canceledReview = await cancelReviewMutation.mutateAsync();
       setState((current) => (current ? { ...current, review: canceledReview } : current));
       window.setTimeout(() => {
         window.close();
@@ -642,7 +665,7 @@ function App() {
 
   if (!state) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-slate-700">
+      <div className="flex min-h-screen items-center justify-center text-foreground">
         <Spinner />
         <Typography.Paragraph size="sm" color="muted" className="ml-3">
           Loading review app...
@@ -703,17 +726,17 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-background text-foreground">
       <header
         ref={reviewHeaderRef}
-        className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 backdrop-blur"
+        className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur"
       >
         <div className={"mx-auto px-4 py-5 " + contentMaxWidth}>
           <div className="flex min-w-0 items-center justify-between gap-4">
             <Typography.Heading
               level={1}
               truncate
-              className="min-w-0 text-lg font-semibold leading-6 text-slate-950"
+              className="min-w-0 text-lg font-semibold leading-6 text-foreground"
             >
               {payload.name}
             </Typography.Heading>
@@ -723,7 +746,7 @@ function App() {
                   {isFinishing || isSaving ? (
                     <motion.span
                       key="loading"
-                      className="absolute inset-0 flex items-center justify-center text-slate-400"
+                      className="absolute inset-0 flex items-center justify-center text-muted"
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
@@ -738,7 +761,7 @@ function App() {
                   ) : reviewStatusLabel ? (
                     <motion.span
                       key="saved"
-                      className="absolute inset-0 flex items-center justify-center text-slate-400"
+                      className="absolute inset-0 flex items-center justify-center text-muted"
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       exit={{ opacity: 0 }}
@@ -766,12 +789,12 @@ function App() {
               fullWidth
               variant="secondary"
               aria-label="Review JSON path"
-              className="group/review-path min-w-0 flex-1 bg-slate-50 shadow-none md:max-w-md"
+              className="group/review-path min-w-0 flex-1 bg-field-background shadow-none md:max-w-md"
             >
               <InputGroup.Input
                 readOnly
                 value={displayedReviewPath}
-                className="font-mono text-xs text-slate-600"
+                className="font-mono text-xs text-muted"
                 onFocus={(event) => event.currentTarget.select()}
               />
               <InputGroup.Suffix className="px-1">
@@ -808,7 +831,7 @@ function App() {
                 <ButtonGroup size="sm" aria-label="Diff layout">
                   <Button
                     variant="ghost"
-                    className={diffStyle === "unified" ? "bg-slate-100" : undefined}
+                    className={diffStyle === "unified" ? "bg-default" : undefined}
                     aria-pressed={diffStyle === "unified"}
                     isDisabled={preferencesMutation.isPending}
                     onPress={() => updateDiffStyle("unified")}
@@ -817,7 +840,7 @@ function App() {
                   </Button>
                   <Button
                     variant="outline"
-                    className={diffStyle === "split" ? "bg-slate-100" : undefined}
+                    className={diffStyle === "split" ? "bg-default" : undefined}
                     aria-pressed={diffStyle === "split"}
                     isDisabled={preferencesMutation.isPending}
                     onPress={() => updateDiffStyle("split")}
@@ -826,6 +849,47 @@ function App() {
                   </Button>
                 </ButtonGroup>
               ) : null}
+              <ButtonGroup size="sm" aria-label="Color theme">
+                <Button
+                  variant={theme === "light" ? "secondary" : "outline"}
+                  isIconOnly
+                  aria-label="Use light theme"
+                  aria-pressed={theme === "light"}
+                  onPress={() => setTheme("light")}
+                >
+                  <Sun
+                    size={reviewIconSize}
+                    strokeWidth={reviewIconStrokeWidth}
+                    aria-hidden="true"
+                  />
+                </Button>
+                <Button
+                  variant={theme === "dark" ? "secondary" : "outline"}
+                  isIconOnly
+                  aria-label="Use dark theme"
+                  aria-pressed={theme === "dark"}
+                  onPress={() => setTheme("dark")}
+                >
+                  <Moon
+                    size={reviewIconSize}
+                    strokeWidth={reviewIconStrokeWidth}
+                    aria-hidden="true"
+                  />
+                </Button>
+                <Button
+                  variant={theme === "system" ? "secondary" : "outline"}
+                  isIconOnly
+                  aria-label="Use system theme"
+                  aria-pressed={theme === "system"}
+                  onPress={() => setTheme("system")}
+                >
+                  <Monitor
+                    size={reviewIconSize}
+                    strokeWidth={reviewIconStrokeWidth}
+                    aria-hidden="true"
+                  />
+                </Button>
+              </ButtonGroup>
               <div
                 role="group"
                 aria-label="Review content actions"
@@ -912,7 +976,7 @@ function App() {
                   <ButtonGroup.Separator />
                   {decisionButtonLabel}
                   <kbd
-                    className="ml-1 rounded border border-white/25 px-1 py-0.5 font-mono text-[10px] leading-none text-white/80"
+                    className="ml-1 rounded border border-current/25 px-1 py-0.5 font-mono text-[10px] leading-none text-current/80"
                     aria-hidden="true"
                   >
                     {primaryShortcutLabel}
@@ -965,6 +1029,8 @@ function App() {
             payload={payload}
             review={review}
             diffStyle={diffStyle}
+            diffTheme={diffTheme}
+            diffThemeType={diffThemeType}
             collapsedFileIds={collapsedFileIds}
             activeCommentId={activeCommentId}
             setActiveCommentId={setActiveCommentId}
@@ -983,6 +1049,8 @@ type ReviewFileDiffProps = {
   file: ReviewSourceFile;
   reviewFile: ReviewFile;
   diffStyle: DiffStyle;
+  diffTheme: "github-dark" | "github-light";
+  diffThemeType: "dark" | "light";
   activeCommentId: string | null;
   setActiveCommentId: (id: string | null) => void;
   addComment: (
@@ -1014,6 +1082,8 @@ const ReviewFileRow = React.memo(function ReviewFileRow(
         file={props.file}
         reviewFile={props.reviewFile}
         diffStyle={props.diffStyle}
+        diffTheme={props.diffTheme}
+        diffThemeType={props.diffThemeType}
         activeCommentId={props.activeCommentId}
         setActiveCommentId={props.setActiveCommentId}
         addComment={props.addComment}
@@ -1028,6 +1098,8 @@ function DiffReviewList(props: {
   payload: ReviewPayload;
   review: ReviewJson;
   diffStyle: DiffStyle;
+  diffTheme: "github-dark" | "github-light";
+  diffThemeType: "dark" | "light";
   collapsedFileIds: Set<string>;
   activeCommentId: string | null;
   setActiveCommentId: (id: string | null) => void;
@@ -1147,6 +1219,8 @@ function DiffReviewList(props: {
               file={file}
               reviewFile={reviewFile}
               diffStyle={props.diffStyle}
+              diffTheme={props.diffTheme}
+              diffThemeType={props.diffThemeType}
               activeCommentId={fileActiveCommentId}
               isExpanded={!props.collapsedFileIds.has(file.id)}
               onExpandedChange={handleFileExpandedChange}
@@ -1361,9 +1435,9 @@ function DocumentReviewSurface(props: {
   }
 
   return (
-    <div className="bg-white">
+    <div className="bg-surface">
       {props.document.location ? (
-        <div className="pb-6 font-mono text-xs text-slate-500">{props.document.location}</div>
+        <div className="pb-6 font-mono text-xs text-muted">{props.document.location}</div>
       ) : null}
       <article
         ref={articleRef}
@@ -1429,7 +1503,7 @@ function installTextSelectionCommentHook(
 }
 
 const reviewDiffUnsafeCSS = [
-  ':host { --review-radius: 6px; --diffs-font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; --diffs-header-font-family: "Geist", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; --diffs-light-bg: #fff; --diffs-light: #000; --diffs-bg-context-override: #fafafa; --diffs-bg-context-gutter-override: #fafafa; --diffs-bg-separator-override: #f5f5f5; --diffs-modified-color: #000; --diffs-bg-hover-override: #0070f3; --diffs-bg-selection-override: #0070f3; --diffs-bg-selection-number-override: #0070f3; --diffs-selection-number-fg: #0070f3; }',
+  ':host { --review-radius: 6px; --diffs-font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; --diffs-header-font-family: "Geist", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; --diffs-bg-hover-override: #0070f3; --diffs-bg-selection-override: #0070f3; --diffs-bg-selection-number-override: #0070f3; --diffs-selection-number-fg: #0070f3; }',
   '[data-diffs-header="default"] { padding-inline: 0 !important; border-radius: var(--review-radius) var(--review-radius) 0 0 !important; }',
   '[data-diffs-header="default"] [data-header-content] { margin-left: 0 !important; }',
   '[data-diffs-header="default"] [data-metadata] { padding-right: 0 !important; }',
@@ -1526,7 +1600,8 @@ const ReviewFileDiff = React.memo(function ReviewFileDiff(props: ReviewFileDiffP
   }, [file, newFile, oldFile]);
   const diffOptions = useMemo<NonNullable<FileDiffProps<CommentAnnotationMetadata>["options"]>>(
     () => ({
-      theme: "github-light",
+      theme: props.diffTheme,
+      themeType: props.diffThemeType,
       diffStyle: props.diffStyle,
       diffIndicators: "classic",
       hunkSeparators: "metadata",
@@ -1548,7 +1623,7 @@ const ReviewFileDiff = React.memo(function ReviewFileDiff(props: ReviewFileDiffP
         });
       },
     }),
-    [clearSelectedLines, file, props.diffStyle],
+    [clearSelectedLines, file, props.diffStyle, props.diffTheme, props.diffThemeType],
   );
 
   const commentsById = useMemo(
@@ -1588,21 +1663,21 @@ const ReviewFileDiff = React.memo(function ReviewFileDiff(props: ReviewFileDiffP
   return (
     <Disclosure
       id={file.id}
-      className="overflow-clip rounded-[var(--vercel-radius)] border border-slate-300 bg-white"
+      className="overflow-clip rounded-[var(--vercel-radius)] border border-border"
     >
       <Disclosure.Heading
         data-review-file-heading={file.id}
-        className="sticky top-[var(--review-header-height,0px)] z-[5] bg-white"
+        className="sticky top-[var(--review-header-height,0px)] z-[5] bg-surface"
       >
-        <Disclosure.Trigger className="group flex w-full items-center justify-between gap-4 bg-white px-4 py-3 text-left transition-colors duration-[var(--motion-duration)] ease-[var(--motion-ease)] hover:bg-slate-50">
+        <Disclosure.Trigger className="group flex w-full items-center justify-between gap-4 bg-surface px-4 py-3 text-left transition-colors duration-[var(--motion-duration)] ease-[var(--motion-ease)] hover:bg-surface-secondary">
           <span className="flex min-w-0 items-center gap-3">
-            <Disclosure.Indicator className="shrink-0 text-slate-500 transition-transform duration-[var(--motion-duration)] ease-[var(--motion-ease)] group-data-[expanded=true]:rotate-90" />
+            <Disclosure.Indicator className="shrink-0 text-muted transition-transform duration-[var(--motion-duration)] ease-[var(--motion-ease)] group-data-[expanded=true]:rotate-90" />
             <span className="min-w-0">
               <Typography
                 type="body-sm"
                 weight="semibold"
                 truncate
-                className="block text-slate-950"
+                className="block text-foreground"
               >
                 {file.location}
               </Typography>
@@ -1622,9 +1697,9 @@ const ReviewFileDiff = React.memo(function ReviewFileDiff(props: ReviewFileDiffP
           </span>
         </Disclosure.Trigger>
       </Disclosure.Heading>
-      <Disclosure.Content className="border-t border-slate-200 !transition-none aria-hidden:border-t-0">
-        <Card className="border-0 bg-white shadow-none" variant="transparent">
-          <Card.Content className="p-0">
+      <Disclosure.Content className="border-t border-border !transition-none aria-hidden:border-t-0">
+        <Card className="border-0 shadow-none" variant="transparent">
+          <Card.Content className="bg-[var(--review-diff-background)] p-4">
             <FileDiff<CommentAnnotationMetadata>
               className="block font-mono [--review-radius:var(--vercel-radius)]"
               fileDiff={fileDiff}
@@ -1790,7 +1865,7 @@ function CommentEditor(props: {
             />
             <CloseButton
               aria-label="Delete comment"
-              className="absolute right-2 top-2 z-10 text-slate-500 hover:text-slate-900"
+              className="absolute right-2 top-2 z-10 text-muted hover:text-foreground"
               onMouseDown={(event) => event.preventDefault()}
               onPress={handleClearComment}
             >
@@ -1839,7 +1914,7 @@ createRoot(document.getElementById("root")!).render(
         }}
         highlighterOptions={{
           lineDiffType: "word",
-          theme: "github-light",
+          theme: { light: "github-light", dark: "github-dark" },
         }}
       >
         <App />

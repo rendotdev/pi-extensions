@@ -1,10 +1,12 @@
+import { DomainClass } from "../domain-class.ts";
+
 export type DiffStyle = "unified" | "split";
 
 export type LgtmPreferences = {
   diffStyle: DiffStyle;
 };
 
-export class LgtmPreferencesClass {
+export class LgtmPreferencesClass extends DomainClass<{}, {}> {
   public readonly defaults: LgtmPreferences = {
     diffStyle: "unified",
   };
@@ -24,4 +26,4 @@ export class LgtmPreferencesClass {
   }
 }
 
-export const lgtmPreferences = new LgtmPreferencesClass();
+export const lgtmPreferences = new LgtmPreferencesClass({}, {});

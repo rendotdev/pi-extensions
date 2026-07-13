@@ -7,7 +7,9 @@ describe("PreferencesApiClass", () => {
       async () => new Response(JSON.stringify({ diffStyle: "split" }), { status: 200 }),
     );
 
-    await expect(new PreferencesApiClass({ fetch }).get()).resolves.toEqual({ diffStyle: "split" });
+    await expect(new PreferencesApiClass({}, { fetch }).get()).resolves.toEqual({
+      diffStyle: "split",
+    });
     expect(fetch).toHaveBeenCalledWith("/api/preferences");
   });
 
@@ -17,7 +19,7 @@ describe("PreferencesApiClass", () => {
     );
 
     await expect(
-      new PreferencesApiClass({ fetch }).update({ preferences: { diffStyle: "unified" } }),
+      new PreferencesApiClass({}, { fetch }).update({ preferences: { diffStyle: "unified" } }),
     ).resolves.toEqual({ diffStyle: "unified" });
     expect(fetch).toHaveBeenCalledWith("/api/preferences", {
       method: "PUT",

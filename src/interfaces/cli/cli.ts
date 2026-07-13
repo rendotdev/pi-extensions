@@ -101,7 +101,7 @@ function helpText() {
   return `LGTM, human approval for agent work
 
 Usage:
-  lgtm review [git] [--name <name>] [--cwd <path>] [--json]
+  lgtm review [git] --name <name> [--cwd <path>] [--json]
   lgtm review worktree <path> [--name <name>] [--cwd <path>] [--json]
   lgtm review json [review.json] [--name <name>] [--cwd <path>] [--json]
   lgtm review document [markdown-file] [--name <name>] [--cwd <path>] [--json]
@@ -246,7 +246,8 @@ async function main() {
     const reviewCommand = args[0] && !args[0].startsWith("--") ? (args.shift() as string) : "git";
 
     if (reviewCommand === "git") {
-      const name = takeOption("--name") ?? "Git review";
+      const name = takeOption("--name");
+      if (!name) throw new Error("review git requires --name <name>.");
       await runCommand({
         label: "Opening Git review",
         execute: async (report) => {

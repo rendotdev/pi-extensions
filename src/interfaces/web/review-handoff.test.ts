@@ -77,7 +77,19 @@ Selected text:
       kind: "diff" as const,
       name: "Authentication review",
       reviewPath: "/Users/example/project/.lgtm/session/review.json",
-      files: [],
+      files: [
+        {
+          location: "src/auth.ts",
+          comments: [
+            {
+              selectedText: "return token;",
+              startLine: 12,
+              endLine: 12,
+              comment: "Please validate this token first.",
+            },
+          ],
+        },
+      ],
       documentComments: [],
     };
 

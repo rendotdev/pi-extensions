@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1050 260" aria-label="LGTM">
+  <style>
+    .mark { fill: #000; stroke: #000; }
+    @media (prefers-color-scheme: dark) { .mark { fill: #fff; stroke: #fff; } }
+  </style>
+  <g class="mark" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="36">
+    <path d="m119 55-72 75 72 75" />
+    <path d="m281 55 72 75-72 75" />
+    <path d="m153 137 34 34 64-68" />
+  </g>
+  <text class="mark" x="410" y="184" font-family="Arial, Helvetica, sans-serif" font-size="180" font-weight="700" letter-spacing="-12">lgtm</text>
+</svg>

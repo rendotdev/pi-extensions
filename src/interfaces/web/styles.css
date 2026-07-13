@@ -40,6 +40,7 @@
   --radius-4xl: var(--vercel-radius);
   --background: #fff;
   --foreground: #000;
+  --review-diff-background: #fff;
   --surface: #fff;
   --surface-foreground: #000;
   --surface-secondary: #fafafa;
@@ -61,6 +62,35 @@
   --input-group-bg: #fafafa;
   --input-group-bg-hover: #f5f5f5;
   --input-group-bg-focus: #fff;
+}
+
+:root.dark,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #111111;
+  --foreground: #f5f5f5;
+  --review-diff-background: #24292e;
+  --surface: #181818;
+  --surface-foreground: #f5f5f5;
+  --surface-secondary: #242424;
+  --surface-secondary-foreground: #f5f5f5;
+  --overlay: #242424;
+  --overlay-foreground: #f5f5f5;
+  --muted: #a3a3a3;
+  --border: #383838;
+  --default: #2a2a2a;
+  --default-hover: #383838;
+  --default-foreground: #f5f5f5;
+  --accent: #f5f5f5;
+  --accent-hover: #d4d4d4;
+  --accent-foreground: #111111;
+  --accent-soft: #2a2a2a;
+  --accent-soft-foreground: #f5f5f5;
+  --field-background: #202020;
+  --field-foreground: #f5f5f5;
+  --input-group-bg: #202020;
+  --input-group-bg-hover: #292929;
+  --input-group-bg-focus: #181818;
 }
 
 body {

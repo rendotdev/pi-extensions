@@ -19,7 +19,7 @@ Prefer the bundled MCP tools when they are available. They keep the tool call op
 
 Use the matching source-specific open tool after the work is ready and validated. Do not open a duplicate while the human is reviewing.
 
-When MCP tools are unavailable, running `lgtm review` is a possible CLI path. Run `lgtm --help`, then use the equivalent command:
+When MCP tools are unavailable, running `lgtm review --name "Review current changes"` is a possible CLI path. Run `lgtm --help`, then use the equivalent command:
 
 Use one command that matches the work being reviewed:
 

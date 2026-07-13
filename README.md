@@ -20,10 +20,10 @@ lgtm setup
 Review the current Git changes:
 
 ```bash
-lgtm review
+lgtm review --name "Review current changes"
 ```
 
-`lgtm review git` is the explicit form of the same command.
+`lgtm review git --name "Review current changes"` is the explicit form of the same command.
 
 LGTM opens the review in your browser. Switch between **Unified** and **Side by side** diff layouts, choose **Approve** to approve, **Send comments** to return your feedback, or **Cancel** to stop. The review result is `approved`, `changes_requested`, or `canceled`. Each review has its own server and directory, so agents can review multiple repositories, worktrees, or checkpoints at once. LGTM saves your layout preference in `.lgtm/lgtm.jsonc` at the project root. The agent gets the result and continues from there.
 

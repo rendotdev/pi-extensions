@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { LgtmPreferencesClass } from "./preferences.ts";
 
 describe("LgtmPreferencesClass", () => {
-  const preferences = new LgtmPreferencesClass();
+  const preferences = new LgtmPreferencesClass({}, {});
 
   it("defaults to a unified diff", () => {
     expect(preferences.parse({ value: {} })).toEqual({ diffStyle: "unified" });

@@ -1,3 +1,5 @@
+import { DomainClass } from "../domain-class.ts";
+
 export type DiffReviewFileInput = {
   location: string;
   oldContent: string;
@@ -117,7 +119,7 @@ export type OpenReviewInput = {
   document?: DocumentSource;
 };
 
-export class ReviewSourceBuilderClass {
+export class ReviewSourceBuilderClass extends DomainClass<{}, {}> {
   public build(params: { file: DiffReviewFileInput; index: number }): ReviewSourceFile {
     const counts = this.countChangedLines({
       oldText: params.file.oldContent,
@@ -228,9 +230,9 @@ export class ReviewSourceBuilderClass {
   }
 }
 
-export const reviewSourceBuilder = new ReviewSourceBuilderClass();
+export const reviewSourceBuilder = new ReviewSourceBuilderClass({}, {});
 
-export class ReviewBuilderClass {
+export class ReviewBuilderClass extends DomainClass<{}, {}> {
   public build(
     params: Omit<ReviewPayload, "generatedAt"> & {
       generatedAt: string;
@@ -267,9 +269,9 @@ export class ReviewBuilderClass {
   }
 }
 
-export const reviewBuilder = new ReviewBuilderClass();
+export const reviewBuilder = new ReviewBuilderClass({}, {});
 
-export class ReviewFormatterClass {
+export class ReviewFormatterClass extends DomainClass<{}, {}> {
   public format(params: { review: ReviewJson; reviewPath: string }) {
     const { review, reviewPath } = params;
     const lines: string[] = [];
@@ -350,4 +352,4 @@ export class ReviewFormatterClass {
   }
 }
 
-export const reviewFormatter = new ReviewFormatterClass();
+export const reviewFormatter = new ReviewFormatterClass({}, {});

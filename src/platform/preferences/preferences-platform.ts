@@ -1,14 +1,13 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { applyEdits, modify, parse, type ParseError } from "jsonc-parser";
+import { DomainClass } from "../../domain/domain-class.ts";
 import { lgtmPreferences, type LgtmPreferences } from "../../domain/preferences/preferences.ts";
 
-export class LgtmPreferencesPlatformClass {
+export class LgtmPreferencesPlatformClass extends DomainClass<{ cwd: string }, {}> {
   public readonly path: string;
-  private readonly params: { cwd: string };
-
-  public constructor(params: { cwd: string }) {
-    this.params = params;
+  public constructor(params: { cwd: string }, deps: {}) {
+    super(params, deps);
     this.path = join(params.cwd, ".lgtm", "lgtm.jsonc");
   }
 

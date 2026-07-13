@@ -1,3 +1,5 @@
+import { DomainClass } from "../domain-class.ts";
+
 export const agentInstallTargets = ["all", "pi", "claude", "codex"] as const;
 
 export type AgentInstallTarget = (typeof agentInstallTargets)[number];
@@ -8,7 +10,7 @@ export type AgentInstallStep = {
   args: string[];
 };
 
-export class AgentInstallPlannerClass {
+export class AgentInstallPlannerClass extends DomainClass<{}, {}> {
   public createPlan(params: { target: AgentInstallTarget }): AgentInstallStep[] {
     if (params.target !== "all") return this.stepsFor(params.target);
     return (["pi", "claude", "codex"] as const).flatMap((target) => this.stepsFor(target));
@@ -41,9 +43,9 @@ export class AgentInstallPlannerClass {
   }
 }
 
-export const agentInstallPlanner = new AgentInstallPlannerClass();
+export const agentInstallPlanner = new AgentInstallPlannerClass({}, {});
 
-export class AgentUpdatePlannerClass {
+export class AgentUpdatePlannerClass extends DomainClass<{}, {}> {
   public createPlan(params: { target: AgentInstallTarget }): AgentInstallStep[] {
     if (params.target !== "all") return this.stepsFor(params.target);
     return (["pi", "claude", "codex"] as const).flatMap((target) => this.stepsFor(target));
@@ -65,7 +67,7 @@ export class AgentUpdatePlannerClass {
   }
 }
 
-export const agentUpdatePlanner = new AgentUpdatePlannerClass();
+export const agentUpdatePlanner = new AgentUpdatePlannerClass({}, {});
 
 export function isAgentInstallTarget(value: string): value is AgentInstallTarget {
   return agentInstallTargets.includes(value as AgentInstallTarget);

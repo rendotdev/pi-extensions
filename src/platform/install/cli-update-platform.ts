@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join, parse, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DomainClass } from "../../domain/domain-class.ts";
 
 export type CliUpdateStep = {
   command: string;
@@ -17,13 +18,12 @@ type CliUpdaterDependencies = {
   runCommand: (step: CliUpdateStep) => Promise<void>;
 };
 
-export class CliUpdaterClass {
+export class CliUpdaterClass extends DomainClass<{ packageRoot: string }, CliUpdaterDependencies> {
   private readonly packageRoot: string;
-  private readonly deps: CliUpdaterDependencies;
 
   public constructor(params: { packageRoot: string }, deps: CliUpdaterDependencies) {
+    super(params, deps);
     this.packageRoot = resolve(params.packageRoot);
-    this.deps = deps;
   }
 
   public plan(): CliUpdateResult {

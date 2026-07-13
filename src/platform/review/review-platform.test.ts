@@ -147,6 +147,19 @@ describe("openReview", () => {
       expect(await fetch(new URL("/api/payload", first.url))).toHaveProperty("ok", true);
       expect(await fetch(new URL("/api/payload", second.url))).toHaveProperty("ok", true);
 
+      const healthResponse = await fetch(new URL("/health", first.url));
+      await expect(healthResponse.json()).resolves.toEqual({ ok: true });
+
+      const invalidPreferencesResponse = await fetch(new URL("/api/preferences", first.url), {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ diffStyle: "invalid" }),
+      });
+      expect(invalidPreferencesResponse.status).toBe(400);
+      await expect(invalidPreferencesResponse.json()).resolves.toEqual(
+        expect.objectContaining({ error: expect.any(String) }),
+      );
+
       expect(await stopReview(cwd, first.reviewPath)).toBe(true);
       await expect(fetch(new URL("/api/payload", first.url))).rejects.toThrow();
       expect(await fetch(new URL("/api/payload", second.url))).toHaveProperty("ok", true);
