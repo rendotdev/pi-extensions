@@ -131,6 +131,7 @@ function printIntegrationResult(params: {
   action: "install" | "update";
   target: AgentInstallTarget;
   steps: AgentInstallStep[];
+  skippedTargets?: Exclude<AgentInstallTarget, "all">[];
 }) {
   if (jsonOutput) {
     console.log(JSON.stringify(params, null, 2));
@@ -139,6 +140,9 @@ function printIntegrationResult(params: {
   console.log(
     `${params.action === "install" ? "Installed" : "Updated"} LGTM for ${params.target}. Start a new agent session to load the plugin and skill.`,
   );
+  if (params.skippedTargets?.length) {
+    console.log(`Skipped uninstalled integrations: ${params.skippedTargets.join(", ")}.`);
+  }
 }
 
 async function main() {
@@ -185,7 +189,7 @@ async function main() {
     printIntegrationResult({
       action: "update",
       target,
-      steps: await agentUpdater.update({ target }),
+      ...(await agentUpdater.update({ target })),
     });
     return;
   }
