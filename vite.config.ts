@@ -94,11 +94,11 @@ export default defineConfig(async ({ command, mode }): Promise<ViteUserConfig> =
       emptyOutDir: true,
     },
     fmt: {
-      ignorePatterns: ["dist/**", ".lgtm/**"],
+      ignorePatterns: ["dist/**", "extensions/**", ".lgtm/**"],
       sortPackageJson: true,
     },
     lint: {
-      ignorePatterns: ["dist/**", ".lgtm/**"],
+      ignorePatterns: ["dist/**", "extensions/**", ".lgtm/**"],
       jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }],
       rules: {
         curly: ["error", "all"],
