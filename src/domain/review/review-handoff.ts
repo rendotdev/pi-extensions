@@ -44,7 +44,9 @@ export class ReviewHandoffClass extends DomainClass<{}, {}> {
       }
     } else {
       for (const file of params.review.files) {
-        for (const comment of file.comments) this.appendComment(lines, file.location, comment);
+        for (const comment of file.comments) {
+          this.appendComment(lines, file.location, comment);
+        }
       }
     }
 
@@ -53,7 +55,9 @@ export class ReviewHandoffClass extends DomainClass<{}, {}> {
 
   private appendComment(lines: string[], location: string, comment: HandoffComment) {
     const text = comment.comment.trim();
-    if (!text) return;
+    if (!text) {
+      return;
+    }
     const lineRange = this.lineRange(comment.startLine, comment.endLine);
     lines.push("", `## ${location}${lineRange}`, "", text);
     if (comment.selectedText.trim()) {
@@ -67,8 +71,12 @@ export class ReviewHandoffClass extends DomainClass<{}, {}> {
   }
 
   private lineRange(startLine: number | null, endLine: number | null) {
-    if (startLine === null) return "";
-    if (endLine === null || endLine === startLine) return `:${startLine}`;
+    if (startLine === null) {
+      return "";
+    }
+    if (endLine === null || endLine === startLine) {
+      return `:${startLine}`;
+    }
     return `:${startLine}-${endLine}`;
   }
 }

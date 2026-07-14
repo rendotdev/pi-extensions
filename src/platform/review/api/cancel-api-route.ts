@@ -12,7 +12,9 @@ export class CancelApiRouteClass extends ApiRouteClass<
   }
 
   public async handle(params: ApiRouteRequest): Promise<boolean> {
-    if (!this.matches(params, "POST", "/api/cancel")) return false;
+    if (!this.matches(params, "POST", "/api/cancel")) {
+      return false;
+    }
     const review = await this.readFile({ path: this.params.reviewPath, schema: reviewSchema });
     const now = new Date().toISOString();
     const nextReview = await this.writeFile({

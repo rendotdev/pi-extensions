@@ -12,7 +12,9 @@ export class FinishApiRouteClass extends ApiRouteClass<
   }
 
   public async handle(params: ApiRouteRequest): Promise<boolean> {
-    if (!this.matches(params, "POST", "/api/finish")) return false;
+    if (!this.matches(params, "POST", "/api/finish")) {
+      return false;
+    }
     const body = await this.readRequest({ request: params.request, schema: finishRequestSchema });
     const review = await this.readFile({ path: this.params.reviewPath, schema: reviewSchema });
     const now = new Date().toISOString();

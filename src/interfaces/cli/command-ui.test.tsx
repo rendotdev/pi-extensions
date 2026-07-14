@@ -69,4 +69,36 @@ describe("CommandUiRendererClass", () => {
 
     expect(writes).toEqual(["✔ Planning LGTM update\nReady.\n"]);
   });
+
+  it("replaces an in-progress label with a completed action", async () => {
+    const writes: string[] = [];
+    const Renderer = new CommandUiRendererClass(
+      {},
+      {
+        stdout: {
+          isTTY: false,
+          write: function write(value) {
+            writes.push(String(value));
+            return true;
+          },
+        },
+        render: function renderUnexpectedly() {
+          throw new Error("The non-interactive test must not render an Ink app.");
+        },
+      },
+    );
+
+    await Renderer.run({
+      label: "Updating LGTM",
+      successLabel: "Updated LGTM",
+      execute: async function execute() {
+        return "  CLI: updated";
+      },
+      renderSuccess: function renderSuccess(result) {
+        return result;
+      },
+    });
+
+    expect(writes).toEqual(["✔ Updated LGTM\n  CLI: updated\n"]);
+  });
 });

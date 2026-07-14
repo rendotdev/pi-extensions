@@ -1,10 +1,13 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { ReviewJson, ReviewOutcome, ReviewPointer } from "../../domain/review/review.ts";
 import {
   BuiltCliPathResolverClass,
+  collectGitReviewFilesSinceLast,
+  finishReview,
   openReview,
   stopReview,
   waitForReview,
@@ -92,7 +95,9 @@ describe("waitForReview", () => {
 describe("WebRootResolverClass", () => {
   it("uses the built frontend before alternate build locations", async () => {
     const stat = vi.fn(async (path: string) => {
-      if (path === "/project/dist/web/index.html") return;
+      if (path === "/project/dist/web/index.html") {
+        return;
+      }
       throw new Error("Missing frontend");
     });
     const Resolver = new WebRootResolverClass(
@@ -129,6 +134,82 @@ describe("BuiltCliPathResolverClass", () => {
   });
 });
 
+describe("collectGitReviewFilesSinceLast", () => {
+  it("compares the working tree with the latest retained review payload", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "lgtm-since-last-git-"));
+    temporaryDirectories.push(cwd);
+    execFileSync("git", ["init", "--quiet"], { cwd });
+    execFileSync("git", ["config", "user.email", "lgtm@example.com"], { cwd });
+    execFileSync("git", ["config", "user.name", "LGTM Test"], { cwd });
+    await Promise.all([
+      writeFile(join(cwd, ".gitignore"), ".lgtm/\n", "utf8"),
+      writeFile(join(cwd, "changed.ts"), "base", "utf8"),
+    ]);
+    execFileSync("git", ["add", ".gitignore", "changed.ts"], { cwd });
+    execFileSync("git", ["commit", "--quiet", "-m", "Initial"], { cwd });
+
+    const appDir = join(cwd, ".lgtm", "previous-review");
+    await mkdir(appDir, { recursive: true });
+    await writeFile(
+      join(appDir, "payload.json"),
+      JSON.stringify({
+        kind: "diff",
+        name: "Previous review",
+        sessionId: "session",
+        reviewUUID: "uuid",
+        reviewId: "previous-review",
+        cwd,
+        appDir,
+        reviewPath: join(appDir, "review.json"),
+        generatedAt: "2026-07-14T11:00:00.000Z",
+        files: [
+          {
+            id: "file-0",
+            location: "changed.ts",
+            language: "typescript",
+            oldContent: "base",
+            newContent: "reviewed",
+            added: 1,
+            removed: 1,
+          },
+        ],
+      }),
+      "utf8",
+    );
+    const previousReview: ReviewJson = {
+      version: 2,
+      kind: "diff",
+      status: "approved",
+      name: "Previous review",
+      sessionId: "session",
+      reviewUUID: "uuid",
+      reviewId: "previous-review",
+      cwd,
+      appDir,
+      reviewPath: join(appDir, "review.json"),
+      createdAt: "2026-07-14T11:00:00.000Z",
+      updatedAt: "2026-07-14T11:00:00.000Z",
+      files: [{ location: "changed.ts", added: 1, removed: 1, comments: [] }],
+      documentComments: [],
+    };
+    await writeFile(join(appDir, "review.json"), JSON.stringify(previousReview), "utf8");
+    await writeFile(join(cwd, "changed.ts"), "follow-up", "utf8");
+    await writeFile(join(cwd, "added.ts"), "added", "utf8");
+
+    await expect(collectGitReviewFilesSinceLast(cwd)).resolves.toEqual({
+      checkpoint: [
+        { location: "changed.ts", content: "follow-up" },
+        { location: "added.ts", content: "added" },
+      ],
+      files: [
+        { location: "changed.ts", oldContent: "reviewed", newContent: "follow-up" },
+        { location: "added.ts", oldContent: "", newContent: "added" },
+      ],
+      baselineReviewId: "previous-review",
+    });
+  });
+});
+
 describe("openReview", () => {
   it("keeps simultaneous reviews in the same checkout independent", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "lgtm-concurrent-"));
@@ -144,6 +225,15 @@ describe("openReview", () => {
 
     try {
       expect(first.reviewPath).not.toBe(second.reviewPath);
+      const manifest = JSON.parse(await readFile(join(first.appDir, "manifest.json"), "utf8")) as {
+        createdAt: string;
+        expiresAt: string;
+        reviewId: string;
+      };
+      expect(manifest.reviewId).toBe(first.reviewId);
+      expect(Date.parse(manifest.expiresAt) - Date.parse(manifest.createdAt)).toBe(
+        7 * 24 * 60 * 60 * 1_000,
+      );
       expect(await fetch(new URL("/api/payload", first.url))).toHaveProperty("ok", true);
       expect(await fetch(new URL("/api/payload", second.url))).toHaveProperty("ok", true);
 
@@ -153,7 +243,7 @@ describe("openReview", () => {
       const invalidPreferencesResponse = await fetch(new URL("/api/preferences", first.url), {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ diffStyle: "invalid" }),
+        body: JSON.stringify({ diffStyle: "invalid", lineWrap: false, sidebarWidth: 256 }),
       });
       expect(invalidPreferencesResponse.status).toBe(400);
       await expect(invalidPreferencesResponse.json()).resolves.toEqual(
@@ -166,6 +256,30 @@ describe("openReview", () => {
     } finally {
       await stopReview(cwd, first.reviewPath);
       await stopReview(cwd, second.reviewPath);
+    }
+  });
+});
+
+describe("finishReview", () => {
+  it("leaves an open review server running", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "lgtm-finish-open-"));
+    temporaryDirectories.push(cwd);
+    const pointer = await openReview(
+      { kind: "document", name: "Open review", document: { markdown: "# Open" } },
+      { cwd, openBrowser: false, detachedServer: false },
+    );
+
+    try {
+      const result = await finishReview(cwd, pointer.reviewPath);
+
+      expect(result).toMatchObject({
+        found: true,
+        review: { status: "open" },
+        stoppedServer: false,
+      });
+      expect(await fetch(new URL("/health", pointer.url))).toHaveProperty("ok", true);
+    } finally {
+      await stopReview(cwd, pointer.reviewPath);
     }
   });
 });

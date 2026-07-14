@@ -7,7 +7,9 @@ export class HealthApiRouteClass extends ApiRouteClass<{}, {}> {
   }
 
   public async handle(params: ApiRouteRequest): Promise<boolean> {
-    if (!this.matches(params, "GET", "/health")) return false;
+    if (!this.matches(params, "GET", "/health")) {
+      return false;
+    }
     this.send({
       response: params.response,
       status: 200,

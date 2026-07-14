@@ -68,14 +68,20 @@ async function readPackageVersion() {
 
 export function incrementVersion(version: string, type: ReleaseType) {
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
-  if (!match) throw new Error(`Expected a stable semantic version, received ${version}.`);
+  if (!match) {
+    throw new Error(`Expected a stable semantic version, received ${version}.`);
+  }
 
   const major = Number(match[1]);
   const minor = Number(match[2]);
   const patch = Number(match[3]);
 
-  if (type === "major") return `${major + 1}.0.0`;
-  if (type === "minor") return `${major}.${minor + 1}.0`;
+  if (type === "major") {
+    return `${major + 1}.0.0`;
+  }
+  if (type === "minor") {
+    return `${major}.${minor + 1}.0`;
+  }
   return `${major}.${minor}.${patch + 1}`;
 }
 
@@ -91,19 +97,27 @@ function assertTagDoesNotExist(tagName: string) {
     cwd: root,
     encoding: "utf8",
   });
-  if (result.status === 0) throw new Error(`Git tag ${tagName} already exists.`);
-  if (result.status !== 1) throw commandError("git", result.stderr);
+  if (result.status === 0) {
+    throw new Error(`Git tag ${tagName} already exists.`);
+  }
+  if (result.status !== 1) {
+    throw commandError("git", result.stderr);
+  }
 }
 
 function run(command: string, arguments_: string[]) {
   console.log(`> ${command} ${arguments_.join(" ")}`);
   const result = spawnSync(command, arguments_, { cwd: root, stdio: "inherit" });
-  if (result.status !== 0) throw commandError(command);
+  if (result.status !== 0) {
+    throw commandError(command);
+  }
 }
 
 function output(command: string, arguments_: string[]) {
   const result = spawnSync(command, arguments_, { cwd: root, encoding: "utf8" });
-  if (result.status !== 0) throw commandError(command, result.stderr);
+  if (result.status !== 0) {
+    throw commandError(command, result.stderr);
+  }
   return result.stdout;
 }
 

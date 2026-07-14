@@ -13,7 +13,9 @@ export class PreferencesGetApiRouteClass extends ApiRouteClass<
   }
 
   public async handle(params: ApiRouteRequest): Promise<boolean> {
-    if (!this.matches(params, "GET", "/api/preferences")) return false;
+    if (!this.matches(params, "GET", "/api/preferences")) {
+      return false;
+    }
     const preferences = preferencesSchema.parse(await this.deps.preferencesPlatform.read());
     this.send({
       response: params.response,

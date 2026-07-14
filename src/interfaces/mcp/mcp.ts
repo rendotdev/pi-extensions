@@ -125,7 +125,8 @@ export const mcpTools: McpTool[] = [
   },
   {
     name: "finish_review",
-    description: "Read the specified review result and stop its local server.",
+    description:
+      "Read the specified review result. Leave an open review running, or stop its local server after a terminal decision.",
     inputSchema: {
       type: "object",
       properties: {
@@ -143,7 +144,9 @@ export const mcpTools: McpTool[] = [
 
 function optionalString(argumentsValue: JsonObject, name: string) {
   const value = argumentsValue[name];
-  if (value === undefined) return undefined;
+  if (value === undefined) {
+    return undefined;
+  }
   if (typeof value !== "string" || value.length === 0) {
     throw new Error(`${name} must be a non-empty string.`);
   }
@@ -152,7 +155,9 @@ function optionalString(argumentsValue: JsonObject, name: string) {
 
 function requiredString(argumentsValue: JsonObject, name: string) {
   const value = optionalString(argumentsValue, name);
-  if (!value) throw new Error(`${name} is required.`);
+  if (!value) {
+    throw new Error(`${name} is required.`);
+  }
   return value;
 }
 
@@ -161,7 +166,9 @@ function jsonReviewFiles(value: unknown): DiffReviewFileInput[] {
     throw new Error("files must be a non-empty array.");
   }
   return value.map((entry, index) => {
-    if (!entry || typeof entry !== "object") throw new Error(`files[${index}] must be an object.`);
+    if (!entry || typeof entry !== "object") {
+      throw new Error(`files[${index}] must be an object.`);
+    }
     const file = entry as JsonObject;
     return {
       location: requiredString(file, "location"),
@@ -172,7 +179,9 @@ function jsonReviewFiles(value: unknown): DiffReviewFileInput[] {
 }
 
 function requiredStringAllowEmpty(value: JsonObject, name: string) {
-  if (typeof value[name] !== "string") throw new Error(`${name} must be a string.`);
+  if (typeof value[name] !== "string") {
+    throw new Error(`${name} must be a string.`);
+  }
   return value[name];
 }
 
@@ -202,7 +211,9 @@ async function openAndWait(
       formattedReview: completion.formattedReview,
     };
   } catch (error) {
-    if (pointer) await dependencies.stopReview(cwd, pointer.reviewPath).catch(() => false);
+    if (pointer) {
+      await dependencies.stopReview(cwd, pointer.reviewPath).catch(() => false);
+    }
     throw error;
   }
 }
@@ -224,14 +235,20 @@ export function createMcpToolHandler(dependencies: McpRuntimeDependencies = defa
         activeOpen.reviewPath = pointer.reviewPath;
       });
     } finally {
-      if (activeOpensByCwd.get(cwd) === activeOpen) activeOpensByCwd.delete(cwd);
+      if (activeOpensByCwd.get(cwd) === activeOpen) {
+        activeOpensByCwd.delete(cwd);
+      }
     }
   }
 
   function abortActiveOpen(cwd: string, reviewPath: string | undefined, message: string) {
     const activeOpen = activeOpensByCwd.get(cwd);
-    if (!activeOpen) return;
-    if (reviewPath && activeOpen.reviewPath !== reviewPath) return;
+    if (!activeOpen) {
+      return;
+    }
+    if (reviewPath && activeOpen.reviewPath !== reviewPath) {
+      return;
+    }
     activeOpen.controller.abort(new DOMException(message, "AbortError"));
   }
 
@@ -318,7 +335,9 @@ export async function runMcpServer() {
   }
   const server = createMcpMessageHandler(send);
 
-  for await (const line of lines) server.handleLine(line);
+  for await (const line of lines) {
+    server.handleLine(line);
+  }
   server.close();
 }
 
@@ -335,7 +354,9 @@ export function createMcpMessageHandler(
   }
 
   function handleLine(line: string) {
-    if (!line.trim()) return;
+    if (!line.trim()) {
+      return;
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(line) as unknown;
@@ -350,14 +371,19 @@ export function createMcpMessageHandler(
     }
     const request = parsed;
 
-    if (request.method === "notifications/initialized") return;
-    if (request.method === "notifications/cancelled" || request.method === "$/cancelRequest") {
-      const id = request.params?.requestId as JsonRpcId | undefined;
-      if (id !== undefined)
-        calls.get(id)?.abort(new DOMException("Tool call canceled.", "AbortError"));
+    if (request.method === "notifications/initialized") {
       return;
     }
-    if (request.id === undefined) return;
+    if (request.method === "notifications/cancelled" || request.method === "$/cancelRequest") {
+      const id = request.params?.requestId as JsonRpcId | undefined;
+      if (id !== undefined) {
+        calls.get(id)?.abort(new DOMException("Tool call canceled.", "AbortError"));
+      }
+      return;
+    }
+    if (request.id === undefined) {
+      return;
+    }
 
     if (request.method === "initialize") {
       respond(request.id, {
@@ -409,9 +435,13 @@ export function createMcpMessageHandler(
 }
 
 function isJsonRpcRequest(value: unknown): value is JsonRpcRequest {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
   const request = value as Record<string, unknown>;
-  if (request.jsonrpc !== "2.0" || typeof request.method !== "string") return false;
+  if (request.jsonrpc !== "2.0" || typeof request.method !== "string") {
+    return false;
+  }
   if (
     request.id !== undefined &&
     request.id !== null &&

@@ -87,9 +87,27 @@ export const reviewPayloadSchema = z.object({
       removed: z.number(),
     }),
   ),
+  checkpoint: z.optional(
+    z.array(
+      z.object({
+        location: z.string(),
+        content: z.string(),
+      }),
+    ),
+  ),
   document: z.optional(documentSourceSchema),
 });
-export const preferencesSchema = z.object({ diffStyle: z.enum(["unified", "split"]) });
+export const reviewManifestSchema = z.object({
+  version: z.literal(1),
+  reviewId: z.string(),
+  createdAt: z.string(),
+  expiresAt: z.string(),
+});
+export const preferencesSchema = z.object({
+  diffStyle: z.enum(["unified", "split"]),
+  lineWrap: z.boolean(),
+  sidebarWidth: z.int().check(z.minimum(192), z.maximum(480)),
+});
 export const finishRequestSchema = z.object({
   decision: z.enum(["approved", "changes_requested"]),
 });

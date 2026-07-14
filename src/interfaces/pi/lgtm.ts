@@ -219,7 +219,8 @@ export class LgtmPiExtensionClass extends DomainClass<{}, LgtmPiExtensionDepende
     return defineTool({
       name: "lgtm-finish-review",
       label: "Finish LGTM Review",
-      description: "Read a specified LGTM review result and always stop its local server.",
+      description:
+        "Read a specified LGTM review result. Leave an open review running, or stop its local server after a terminal decision.",
       promptSnippet: "lgtm-finish-review: Recover a specified LGTM result and stop its server.",
       promptGuidelines: [
         "Use lgtm-finish-review with the exact reviewPath only when the user requests it or when a completed review did not return its automatic follow-up.",

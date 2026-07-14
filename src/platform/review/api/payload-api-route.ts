@@ -7,7 +7,9 @@ export class PayloadApiRouteClass extends ApiRouteClass<{ payloadPath: string },
   }
 
   public async handle(params: ApiRouteRequest): Promise<boolean> {
-    if (!this.matches(params, "GET", "/api/payload")) return false;
+    if (!this.matches(params, "GET", "/api/payload")) {
+      return false;
+    }
     const payload = await this.readFile({
       path: this.params.payloadPath,
       schema: reviewPayloadSchema,

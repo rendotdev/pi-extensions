@@ -13,7 +13,9 @@ export class PreferencesPutApiRouteClass extends ApiRouteClass<
   }
 
   public async handle(params: ApiRouteRequest): Promise<boolean> {
-    if (!this.matches(params, "PUT", "/api/preferences")) return false;
+    if (!this.matches(params, "PUT", "/api/preferences")) {
+      return false;
+    }
     const preferences = await this.readRequest({
       request: params.request,
       schema: preferencesSchema,

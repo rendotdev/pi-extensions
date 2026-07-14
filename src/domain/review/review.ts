@@ -109,13 +109,20 @@ export type ReviewPayload = {
   reviewPath: string;
   generatedAt: string;
   files: ReviewSourceFile[];
+  checkpoint?: ReviewCheckpointFile[];
   document?: DocumentSource;
+};
+
+export type ReviewCheckpointFile = {
+  location: string;
+  content: string;
 };
 
 export type OpenReviewInput = {
   kind: "diff" | "document";
   name: string;
   files?: DiffReviewFileInput[];
+  checkpoint?: ReviewCheckpointFile[];
   document?: DocumentSource;
 };
 
@@ -183,7 +190,9 @@ export class ReviewSourceBuilderClass extends DomainClass<{}, {}> {
   }
 
   private splitLines(params: { value: string }) {
-    if (params.value.length === 0) return [];
+    if (params.value.length === 0) {
+      return [];
+    }
     return params.value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
   }
 
@@ -282,13 +291,19 @@ export class ReviewFormatterClass extends DomainClass<{}, {}> {
     lines.push(`Review ID: ${review.reviewId ?? review.sessionUUID ?? "unknown"}`);
     lines.push(`Review UUID: ${review.reviewUUID ?? "unknown"}`);
     lines.push(`Status: ${review.status ?? "open"}`);
-    if (review.finishedAt) lines.push(`Finished: ${review.finishedAt}`);
-    if (review.url) lines.push(`Review app URL: ${review.url}`);
+    if (review.finishedAt) {
+      lines.push(`Finished: ${review.finishedAt}`);
+    }
+    if (review.url) {
+      lines.push(`Review app URL: ${review.url}`);
+    }
     lines.push(`Updated: ${review.updatedAt}`);
     lines.push("");
 
     if (review.kind === "document") {
-      if (review.document?.location) lines.push(`Document: ${review.document.location}`, "");
+      if (review.document?.location) {
+        lines.push(`Document: ${review.document.location}`, "");
+      }
       const comments = review.documentComments.filter(
         (comment) => comment.comment.trim().length > 0,
       );
@@ -305,7 +320,9 @@ export class ReviewFormatterClass extends DomainClass<{}, {}> {
         lines.push(`Comment: ${comment.comment.trim()}`);
         lines.push("");
       }
-      if (comments.length === 0) lines.push("No written review comments were found.");
+      if (comments.length === 0) {
+        lines.push("No written review comments were found.");
+      }
       return lines.join("\n");
     }
 
@@ -322,7 +339,9 @@ export class ReviewFormatterClass extends DomainClass<{}, {}> {
       }
 
       for (const comment of file.comments) {
-        if (comment.comment.trim().length === 0) continue;
+        if (comment.comment.trim().length === 0) {
+          continue;
+        }
         commentCount += 1;
         lines.push("");
         lines.push(`- ${this.formatLineRange({ comment })}`);
@@ -334,20 +353,28 @@ export class ReviewFormatterClass extends DomainClass<{}, {}> {
       lines.push("");
     }
 
-    if (commentCount === 0) lines.push("No written review comments were found.");
+    if (commentCount === 0) {
+      lines.push("No written review comments were found.");
+    }
     return lines.join("\n");
   }
 
   private formatLineRange(params: { comment: ReviewComment }) {
     const { comment } = params;
     const side = comment.side ? `${comment.side}, ` : "";
-    if (comment.startLine === null || comment.endLine === null) return `${side}selected lines`;
-    if (comment.startLine === comment.endLine) return `${side}line ${comment.startLine}`;
+    if (comment.startLine === null || comment.endLine === null) {
+      return `${side}selected lines`;
+    }
+    if (comment.startLine === comment.endLine) {
+      return `${side}line ${comment.startLine}`;
+    }
     return `${side}lines ${comment.startLine}-${comment.endLine}`;
   }
 
   private truncate(params: { value: string }) {
-    if (params.value.length <= 2000) return params.value;
+    if (params.value.length <= 2000) {
+      return params.value;
+    }
     return `${params.value.slice(0, 2000)}...`;
   }
 }

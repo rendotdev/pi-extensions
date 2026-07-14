@@ -35,7 +35,9 @@ export abstract class ApiRouteClass<Params, Deps> extends DomainClass<Params, De
     for await (const chunk of params.request) {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       size += buffer.length;
-      if (size > 10 * 1024 * 1024) throw new Error("Request body is too large.");
+      if (size > 10 * 1024 * 1024) {
+        throw new Error("Request body is too large.");
+      }
       chunks.push(buffer);
     }
     return params.schema.parse(JSON.parse(Buffer.concat(chunks).toString("utf8")));

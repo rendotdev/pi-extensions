@@ -4,8 +4,10 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   collectGitReviewFiles,
+  collectGitReviewFilesSinceLast,
   finishReview,
   openReview,
+  ReviewIdentifier,
   serveReviewApp,
   stopReviews,
 } from "../../platform/review/review-platform.ts";
@@ -24,7 +26,9 @@ import { JsonReviewInputParser } from "./json-review-input.ts";
 import { CommandUiRenderer } from "./command-ui.tsx";
 
 const args = process.argv.slice(2);
-if (args[0] === "--") args.shift();
+if (args[0] === "--") {
+  args.shift();
+}
 const helpRequested = args.includes("--help") || args.includes("-h");
 const command = helpRequested
   ? "help"
@@ -33,12 +37,18 @@ const command = helpRequested
     : "help";
 const jsonOutput = takeFlag("--json");
 const cwd = resolve(takeOption("--cwd") ?? process.cwd());
+const configuredReviewSessionId = process.env.LGTM_SESSION_ID ?? process.env.CODEX_THREAD_ID;
+const reviewSessionId = configuredReviewSessionId
+  ? ReviewIdentifier.sanitizePathSegment({ value: configuredReviewSessionId })
+  : undefined;
 const cancellation = new AbortController();
 let cancelling = false;
 let commandErrorRendered = false;
 
 async function cancel() {
-  if (cancelling) return;
+  if (cancelling) {
+    return;
+  }
   cancelling = true;
   cancellation.abort();
   await stopReviews(cwd).catch(() => false);
@@ -53,16 +63,22 @@ process.once("SIGTERM", () => {
 
 function takeFlag(flag: string) {
   const index = args.indexOf(flag);
-  if (index < 0) return false;
+  if (index < 0) {
+    return false;
+  }
   args.splice(index, 1);
   return true;
 }
 
 function takeOption(option: string) {
   const index = args.indexOf(option);
-  if (index < 0) return undefined;
+  if (index < 0) {
+    return undefined;
+  }
   const value = args[index + 1];
-  if (!value || value.startsWith("--")) throw new Error(`${option} requires a value.`);
+  if (!value || value.startsWith("--")) {
+    throw new Error(`${option} requires a value.`);
+  }
   args.splice(index, 2);
   return value;
 }
@@ -70,6 +86,7 @@ function takeOption(option: string) {
 function reviewOptions(report: (label: string) => void) {
   return {
     cwd,
+    sessionId: reviewSessionId,
     signal: cancellation.signal,
     onUpdate: jsonOutput ? undefined : report,
   };
@@ -101,7 +118,7 @@ function helpText() {
   return `LGTM, human approval for agent work
 
 Usage:
-  lgtm review [git] --name <name> [--cwd <path>] [--json]
+  lgtm review [git] --name <name> [--since-last] [--cwd <path>] [--json]
   lgtm review worktree <path> [--name <name>] [--cwd <path>] [--json]
   lgtm review json [review.json] [--name <name>] [--cwd <path>] [--json]
   lgtm review document [markdown-file] [--name <name>] [--cwd <path>] [--json]
@@ -118,7 +135,7 @@ JSON review schema:
     ]
   }
 
-Run \`lgtm review\` to review current Git changes. Document Markdown and review JSON are read from stdin when no file is supplied. Review outcomes are \`approved\`, \`changes_requested\`, or \`canceled\`.`;
+Run \`lgtm review --name "Review current changes"\` to review current Git changes. Add \`--since-last\` to show only changes made after the most recent compatible LGTM diff review with an approved or changes-requested outcome. Document Markdown and review JSON are read from stdin when no file is supplied. Review outcomes are \`approved\`, \`changes_requested\`, or \`canceled\`.`;
 }
 
 function formatIntegrationResult(params: {
@@ -127,21 +144,64 @@ function formatIntegrationResult(params: {
   steps: AgentInstallStep[];
   skippedTargets?: Exclude<AgentInstallTarget, "all">[];
   cli?: CliUpdateResult;
+  dryRun?: boolean;
 }) {
   const lines: string[] = [];
-  if (params.cli?.status === "updated") lines.push("Updated the LGTM CLI.");
-  if (params.cli?.status === "skipped") lines.push(`Skipped CLI update: ${params.cli.reason}`);
-  lines.push(
-    `${params.action === "setup" ? "Set up" : "Updated"} LGTM integrations for ${params.target}. Start a new agent session to load the plugin and skill.`,
-  );
-  if (params.skippedTargets?.length) {
-    lines.push(`Skipped uninstalled integrations: ${params.skippedTargets.join(", ")}.`);
+  if (params.action === "setup") {
+    lines.push(
+      params.dryRun
+        ? `Would set up LGTM integrations for ${params.target}.`
+        : `Set up LGTM integrations for ${params.target}. Start a new agent session to load the plugin and skill.`,
+    );
+    return CommandUiRenderer.formatChecklist({ lines });
   }
-  return CommandUiRenderer.formatChecklist({ lines });
+
+  if (params.cli?.status === "updated") {
+    lines.push(`  CLI: ${params.dryRun ? "would update" : "updated"}`);
+  }
+  if (params.cli?.status === "skipped") {
+    lines.push(`  CLI: skipped; ${params.cli.reason}`);
+  }
+
+  const updatedTargets = [
+    ...new Set(
+      params.steps.map(function selectTarget(step) {
+        return step.target;
+      }),
+    ),
+  ];
+  const integrationNames: Record<Exclude<AgentInstallTarget, "all">, string> = {
+    pi: "Pi",
+    claude: "Claude Code",
+    codex: "Codex",
+  };
+  const ListFormatter = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
+  if (updatedTargets.length > 0) {
+    const targets = ListFormatter.format(
+      updatedTargets.map(function selectName(target) {
+        return integrationNames[target];
+      }),
+    );
+    lines.push(`  Integrations: ${params.dryRun ? "would update" : "updated"} (${targets})`);
+    if (!params.dryRun) {
+      lines.push("  Restart your agent session to load the updated plugin and skill.");
+    }
+  }
+  if (params.skippedTargets?.length) {
+    const targets = ListFormatter.format(
+      params.skippedTargets.map(function selectName(target) {
+        return integrationNames[target];
+      }),
+    );
+    const verb = params.skippedTargets.length > 1 ? "are" : "is";
+    lines.push(`  Integrations: skipped (${targets} ${verb} not installed)`);
+  }
+  return CommandUiRenderer.formatDetail({ lines });
 }
 
 async function runCommand<Result>(params: {
   label: string;
+  successLabel?: string;
   execute: (report: (label: string) => void) => Promise<Result>;
   renderSuccess: (result: Result) => string;
 }): Promise<Result> {
@@ -166,7 +226,9 @@ async function main() {
 
   if (command === "serve") {
     const appDir = takeOption("--app-dir");
-    if (!appDir) throw new Error("serve requires --app-dir.");
+    if (!appDir) {
+      throw new Error("serve requires --app-dir.");
+    }
     await serveReviewApp(appDir);
     return;
   }
@@ -180,7 +242,7 @@ async function main() {
     if (takeFlag("--dry-run")) {
       await runCommand({
         label: "Planning LGTM setup",
-        execute: async () => ({ action: "setup" as const, target, steps: plan }),
+        execute: async () => ({ action: "setup" as const, target, steps: plan, dryRun: true }),
         renderSuccess: formatIntegrationResult,
       });
       return;
@@ -211,13 +273,15 @@ async function main() {
           target,
           steps: plan,
           cli: CliUpdater.plan(),
+          dryRun: true,
         }),
         renderSuccess: formatIntegrationResult,
       });
       return;
     }
     await runCommand({
-      label: "Updating LGTM integrations",
+      label: "Updating LGTM",
+      successLabel: "Updated LGTM",
       execute: async () => ({
         action: "update" as const,
         target,
@@ -247,11 +311,30 @@ async function main() {
 
     if (reviewCommand === "git") {
       const name = takeOption("--name");
-      if (!name) throw new Error("review git requires --name <name>.");
+      const sinceLast = takeFlag("--since-last");
+      if (!name) {
+        throw new Error("review git requires --name <name>.");
+      }
       await runCommand({
         label: "Opening Git review",
         execute: async (report) => {
-          report("Collecting Git changes");
+          report(sinceLast ? "Collecting changes since the last review" : "Collecting Git changes");
+          if (sinceLast) {
+            const collection = await collectGitReviewFilesSinceLast(
+              cwd,
+              cancellation.signal,
+              reviewSessionId,
+            );
+            return await openReview(
+              {
+                kind: "diff",
+                name,
+                files: collection.files,
+                checkpoint: collection.checkpoint,
+              },
+              reviewOptions(report),
+            );
+          }
           const files = await collectGitReviewFiles(cwd);
           return await openReview({ kind: "diff", name, files }, reviewOptions(report));
         },
@@ -262,7 +345,9 @@ async function main() {
 
     if (reviewCommand === "worktree") {
       const worktree = args.shift();
-      if (!worktree) throw new Error("worktree requires a path.");
+      if (!worktree) {
+        throw new Error("worktree requires a path.");
+      }
       const name = takeOption("--name") ?? "Worktree review";
       await runCommand({
         label: "Opening worktree review",
@@ -304,7 +389,9 @@ async function main() {
         execute: async (report) => {
           report("Reading Markdown document");
           const markdown = await readInput(documentPath);
-          if (!markdown.trim()) throw new Error("Document review requires Markdown input.");
+          if (!markdown.trim()) {
+            throw new Error("Document review requires Markdown input.");
+          }
           const name =
             takeOption("--name") ?? (documentPath ? `Review ${documentPath}` : "Document review");
           return await openReview(
@@ -319,14 +406,18 @@ async function main() {
 
     if (reviewCommand === "result") {
       const reviewPath = takeOption("--review-path");
-      if (!reviewPath) throw new Error("result requires --review-path.");
+      if (!reviewPath) {
+        throw new Error("result requires --review-path.");
+      }
       await runCommand({
         label: "Reading LGTM review result",
         execute: async () => await finishReview(cwd, reviewPath),
         renderSuccess: (result) =>
           !result.found
             ? "No LGTM review found."
-            : `${result.formattedReview}\n\nServer stopped: ${result.stoppedServer ? "yes" : "no"}`,
+            : result.review.status === "open"
+              ? `${result.formattedReview}\n\nReview is still open. Server left running.`
+              : `${result.formattedReview}\n\nServer stopped: ${result.stoppedServer ? "yes" : "no"}`,
       });
       return;
     }
@@ -338,6 +429,8 @@ async function main() {
 }
 
 main().catch((error) => {
-  if (!commandErrorRendered) console.error(error instanceof Error ? error.message : String(error));
+  if (!commandErrorRendered) {
+    console.error(error instanceof Error ? error.message : String(error));
+  }
   process.exitCode = 1;
 });

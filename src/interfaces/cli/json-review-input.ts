@@ -38,9 +38,13 @@ export class JsonReviewInputParserClass extends DomainClass<{}, {}> {
   }
 
   private formatPath(params: { path: PropertyKey[] }): string {
-    if (params.path.length === 0) return "input";
+    if (params.path.length === 0) {
+      return "input";
+    }
     return params.path.reduce<string>((path, part) => {
-      if (typeof part === "number") return `${path}[${part}]`;
+      if (typeof part === "number") {
+        return `${path}[${part}]`;
+      }
       return path ? `${path}.${String(part)}` : String(part);
     }, "");
   }

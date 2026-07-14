@@ -12,7 +12,9 @@ export type AgentInstallStep = {
 
 export class AgentInstallPlannerClass extends DomainClass<{}, {}> {
   public createPlan(params: { target: AgentInstallTarget }): AgentInstallStep[] {
-    if (params.target !== "all") return this.stepsFor(params.target);
+    if (params.target !== "all") {
+      return this.stepsFor(params.target);
+    }
     return (["pi", "claude", "codex"] as const).flatMap((target) => this.stepsFor(target));
   }
 
@@ -47,7 +49,9 @@ export const AgentInstallPlanner = new AgentInstallPlannerClass({}, {});
 
 export class AgentUpdatePlannerClass extends DomainClass<{}, {}> {
   public createPlan(params: { target: AgentInstallTarget }): AgentInstallStep[] {
-    if (params.target !== "all") return this.stepsFor(params.target);
+    if (params.target !== "all") {
+      return this.stepsFor(params.target);
+    }
     return (["pi", "claude", "codex"] as const).flatMap((target) => this.stepsFor(target));
   }
 

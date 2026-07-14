@@ -3,7 +3,6 @@ import { ToastNotificationsClass } from "./toast-notifications.ts";
 
 describe("ToastNotificationsClass", () => {
   it.each([
-    ["preferencesNotSaved", "Preferences not saved"],
     ["preferencesUnavailable", "Preferences unavailable"],
     ["reviewUnavailable", "Review unavailable"],
     ["commentsNotSaved", "Comments not saved"],
@@ -16,5 +15,14 @@ describe("ToastNotificationsClass", () => {
     Notifications[method]();
 
     expect(showDanger).toHaveBeenCalledWith(message);
+  });
+
+  it("includes the preference save error", () => {
+    const showDanger = vi.fn();
+    const Notifications = new ToastNotificationsClass({}, { showDanger });
+
+    Notifications.preferencesNotSaved({ error: new Error("Failed to fetch") });
+
+    expect(showDanger).toHaveBeenCalledWith("Preferences not saved: Failed to fetch");
   });
 });

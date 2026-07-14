@@ -1,11 +1,15 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import { extname, join, resolve, sep } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { DomainClass } from "../../domain/domain-class.ts";
+import {
+  ReviewRetentionPolicy,
+  type ReviewManifest,
+} from "../../domain/review/review-retention.ts";
 import {
   ReviewBuilder,
   ReviewFormatter,
@@ -18,8 +22,14 @@ import {
   type ReviewPointer,
 } from "../../domain/review/review.ts";
 import { LgtmPreferencesPlatformClass } from "../preferences/preferences-platform.ts";
+import { ReviewExpirationSchedulerClass } from "./review-expiration-scheduler.ts";
+import { ReviewGarbageCollectorClass } from "./review-garbage-collector.ts";
+import {
+  ReviewSinceLastPlatform,
+  type SinceLastReviewCollection,
+} from "./review-since-last-platform.ts";
 import { ReviewApiRouterClass } from "./api/review-api-router.ts";
-import { reviewPayloadSchema } from "./api/api-schemas.ts";
+import { reviewManifestSchema, reviewPayloadSchema } from "./api/api-schemas.ts";
 
 type CommandResult = {
   stdout: string;
@@ -84,7 +94,9 @@ class ReviewServerLifecycleClass extends DomainClass<
       this.deps.activeReviewServersByPath.get(params.reviewPath) ??
       (await this.deps.readReviewServerState(appDir));
     const pid = knownState?.pid ?? (await this.deps.readReviewServerPid(appDir));
-    if (!pid) return false;
+    if (!pid) {
+      return false;
+    }
     const state: ReviewServerState = knownState ?? {
       pid,
       url: params.review.url ?? "",
@@ -123,7 +135,9 @@ export class BuiltCliPathResolverClass extends DomainClass<
 > {
   public async resolve(): Promise<string> {
     const sourceReviewPlatformPath = `${sep}src${sep}platform${sep}review${sep}review-platform.ts`;
-    if (!this.params.modulePath.endsWith(sourceReviewPlatformPath)) return this.params.modulePath;
+    if (!this.params.modulePath.endsWith(sourceReviewPlatformPath)) {
+      return this.params.modulePath;
+    }
 
     const cliPath = resolve(this.params.modulePath, "..", "..", "..", "..", "dist", "cli.mjs");
     try {
@@ -141,7 +155,7 @@ const abortCleanupByReviewPath = new Map<string, () => void>();
 const finishWatchersByReviewPath = new Map<string, ReturnType<typeof setInterval>>();
 let processCleanupRegistered = false;
 
-const ReviewIdentifier = new ReviewIdentifierClass({}, {});
+export const ReviewIdentifier = new ReviewIdentifierClass({}, {});
 const ReviewServerLifecycle = new ReviewServerLifecycleClass(
   {},
   {
@@ -158,6 +172,13 @@ const WebRootResolver = new WebRootResolverClass(
 const BuiltCliPathResolver = new BuiltCliPathResolverClass(
   { modulePath: fileURLToPath(import.meta.url) },
   { stat },
+);
+const ReviewGarbageCollector = new ReviewGarbageCollectorClass(
+  {},
+  {
+    retentionPolicy: ReviewRetentionPolicy,
+    stopServer: stopReviewServerForAppDir,
+  },
 );
 
 export type OpenReviewOptions = {
@@ -186,6 +207,7 @@ export async function openReview(
   const appDir = resolve(cwd, ".lgtm", reviewId);
   const reviewPath = join(appDir, "review.json");
   const generatedAt = new Date().toISOString();
+  const manifest = ReviewRetentionPolicy.createManifest({ reviewId, createdAt: generatedAt });
   const files = (input.files ?? []).map((file, index) =>
     ReviewSourceBuilder.build({ file, index }),
   );
@@ -220,10 +242,10 @@ export async function openReview(
     reviewPath,
     generatedAt,
     files,
+    checkpoint: input.checkpoint,
     document: input.document,
   };
-  await writeReviewApp(appDir, payload, review);
-
+  await writeReviewApp(appDir, payload, review, manifest);
   options.onUpdate?.("Starting LGTM review server...");
   const server = await startReviewServer(appDir, options.signal, options.detachedServer);
   const serverState: ReviewServerState = {
@@ -253,7 +275,9 @@ export async function openReview(
       abortCleanupByReviewPath.set(reviewPath, () =>
         options.signal?.removeEventListener("abort", abort),
       );
-      if (options.signal.aborted) abort();
+      if (options.signal.aborted) {
+        abort();
+      }
     }
     if (options.cleanupOnExit) {
       cleanupReviewServersByPath.set(reviewPath, serverState);
@@ -269,8 +293,12 @@ export async function openReview(
       url,
       reviewPath,
     };
-    if (options.onFinished) startReviewFinishWatcher(cwd, pointer, options.onFinished);
-    if (options.openBrowser !== false) openInDefaultBrowser(url);
+    if (options.onFinished) {
+      startReviewFinishWatcher(cwd, pointer, options.onFinished);
+    }
+    if (options.openBrowser !== false) {
+      openInDefaultBrowser(url);
+    }
     return pointer;
   } catch (error) {
     if (options.trackAsActiveReview !== false) {
@@ -287,6 +315,7 @@ export async function openReview(
 export async function collectGitReviewFiles(
   cwd: string,
   signal?: AbortSignal,
+  options: { allowEmpty?: boolean } = {},
 ): Promise<DiffReviewFileInput[]> {
   const rootResult = await runCommand("git", ["rev-parse", "--show-toplevel"], cwd, signal, 10_000);
   if (rootResult.code !== 0) {
@@ -357,7 +386,9 @@ export async function collectGitReviewFiles(
     const oldContent =
       hasHead && change.oldPath ? await readGitFile(root, change.oldPath, signal) : "";
     const newContent = change.newPath ? await readWorkingTreeFile(root, change.newPath) : "";
-    if (oldContent.includes("\0") || newContent.includes("\0")) continue;
+    if (oldContent.includes("\0") || newContent.includes("\0")) {
+      continue;
+    }
     files.push({
       location: change.newPath ?? change.oldPath ?? "unknown",
       oldContent,
@@ -365,10 +396,35 @@ export async function collectGitReviewFiles(
     });
   }
 
-  if (files.length === 0) {
+  if (files.length === 0 && options.allowEmpty !== true) {
     throw new Error("No text changes were found to review.");
   }
   return files;
+}
+
+export async function collectGitReviewFilesSinceLast(
+  cwd: string,
+  signal?: AbortSignal,
+  sessionId?: string,
+): Promise<SinceLastReviewCollection> {
+  const rootResult = await runCommand("git", ["rev-parse", "--show-toplevel"], cwd, signal, 10_000);
+  if (rootResult.code !== 0) {
+    throw new Error(
+      `Unable to open Git review from ${cwd}.\n${rootResult.stderr || rootResult.stdout}`,
+    );
+  }
+  const root = rootResult.stdout.trim();
+  const currentFiles = await collectGitReviewFiles(cwd, signal, { allowEmpty: true });
+  const collection = await ReviewSinceLastPlatform.collect({
+    root,
+    reviewRoots: [resolve(root, ".lgtm"), resolve(cwd, ".lgtm")],
+    currentFiles,
+    sessionId,
+  });
+  if (collection.files.length === 0) {
+    throw new Error("No text changes were found since the last LGTM review.");
+  }
+  return collection;
 }
 
 function parseGitNameStatus(output: string): Array<{ oldPath?: string; newPath?: string }> {
@@ -424,10 +480,18 @@ async function readReviewIfExists(reviewPath: string): Promise<ReviewJson | unde
   }
 }
 
-async function writeReviewApp(appDir: string, payload: ReviewPayload, review: ReviewJson) {
+async function writeReviewApp(
+  appDir: string,
+  payload: ReviewPayload,
+  review: ReviewJson,
+  manifest: ReviewManifest,
+) {
   await mkdir(appDir, { recursive: true });
-  await writeFile(join(appDir, "payload.json"), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-  await writeFile(join(appDir, "review.json"), `${JSON.stringify(review, null, 2)}\n`, "utf8");
+  await Promise.all([
+    writeFile(join(appDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8"),
+    writeFile(join(appDir, "payload.json"), `${JSON.stringify(payload, null, 2)}\n`, "utf8"),
+    writeFile(join(appDir, "review.json"), `${JSON.stringify(review, null, 2)}\n`, "utf8"),
+  ]);
 }
 
 async function startReviewServer(
@@ -438,7 +502,7 @@ async function startReviewServer(
   const cliPath = await BuiltCliPathResolver.resolve();
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn("node", [cliPath, "serve", "--app-dir", appDir], {
-      cwd: appDir,
+      cwd: resolve(appDir, "..", ".."),
       env: { ...process.env },
       detached,
       stdio: ["ignore", "pipe", "pipe"],
@@ -446,8 +510,11 @@ async function startReviewServer(
 
     const timeout = setTimeout(() => {
       cleanup();
-      if (child.pid) killReviewServerPid(child.pid, "SIGTERM");
-      else child.kill();
+      if (child.pid) {
+        killReviewServerPid(child.pid, "SIGTERM");
+      } else {
+        child.kill();
+      }
       rejectPromise(new Error("Timed out while starting LGTM review server."));
     }, 20_000);
 
@@ -456,8 +523,11 @@ async function startReviewServer(
 
     function abort() {
       cleanup();
-      if (child.pid) killReviewServerPid(child.pid, "SIGTERM");
-      else child.kill();
+      if (child.pid) {
+        killReviewServerPid(child.pid, "SIGTERM");
+      } else {
+        child.kill();
+      }
       rejectPromise(new Error("Cancelled while starting LGTM review server."));
     }
 
@@ -470,7 +540,9 @@ async function startReviewServer(
     }
 
     async function finish(url: string) {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
       const pid = child.pid;
       if (!pid) {
         settled = true;
@@ -502,7 +574,9 @@ async function startReviewServer(
     }
 
     function onExit(code: number | null) {
-      if (settled) return;
+      if (settled) {
+        return;
+      }
       settled = true;
       cleanup();
       rejectPromise(
@@ -522,6 +596,9 @@ export async function serveReviewApp(appDirInput: string): Promise<void> {
   const payloadPath = join(appDir, "payload.json");
   const reviewPath = join(appDir, "review.json");
   const payload = reviewPayloadSchema.parse(await readJsonFile<ReviewPayload>(payloadPath));
+  const manifest = reviewManifestSchema.parse(
+    await readJsonFile<ReviewManifest>(join(appDir, "manifest.json")),
+  );
   const PreferencesPlatform = new LgtmPreferencesPlatformClass({ cwd: payload.cwd }, {});
   const webRoot = await WebRootResolver.resolve();
   let server: ReturnType<typeof createServer>;
@@ -541,7 +618,9 @@ export async function serveReviewApp(appDirInput: string): Promise<void> {
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
 
-      if (await ApiRouter.handle({ request, response, url })) return;
+      if (await ApiRouter.handle({ request, response, url })) {
+        return;
+      }
 
       if (request.method === "GET") {
         return await sendStaticFile(response, webRoot, url.pathname);
@@ -552,6 +631,31 @@ export async function serveReviewApp(appDirInput: string): Promise<void> {
       ApiRouter.sendError({ response, status: 400, error });
     }
   });
+
+  async function expireReview() {
+    await rm(appDir, { force: true, recursive: true });
+    server.close(function exitExpiredReview() {
+      process.exit(0);
+    });
+    server.closeAllConnections();
+    const forceExit = setTimeout(() => process.exit(0), 1_000);
+    forceExit.unref();
+  }
+
+  const ExpirationScheduler = new ReviewExpirationSchedulerClass(
+    { expiresAt: manifest.expiresAt },
+    {
+      now: () => new Date(),
+      onError: function reportExpirationError(error) {
+        process.stderr.write(
+          `LGTM review expiration failed: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+      },
+      onExpire: expireReview,
+      setTimer: setTimeout,
+    },
+  );
+  ExpirationScheduler.schedule();
 
   await new Promise<void>((resolvePromise, rejectPromise) => {
     server.once("error", rejectPromise);
@@ -565,6 +669,27 @@ export async function serveReviewApp(appDirInput: string): Promise<void> {
       resolvePromise();
     });
   });
+
+  async function cleanExpiredReviews() {
+    try {
+      const result = await ReviewGarbageCollector.cleanExpired({
+        root: join(payload.cwd, ".lgtm"),
+        excludeAppDir: appDir,
+      });
+      if (result.failures.length === 0) {
+        return;
+      }
+      process.stderr.write(
+        `LGTM cleanup could not fully remove ${result.failures.length} expired review item(s).\n`,
+      );
+    } catch (error) {
+      process.stderr.write(
+        `LGTM cleanup failed: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+    }
+  }
+
+  void cleanExpiredReviews();
 }
 
 async function readJsonFile<T>(path: string): Promise<T> {
@@ -636,6 +761,24 @@ async function readReviewServerState(appDir: string): Promise<ReviewServerState 
   return undefined;
 }
 
+async function stopReviewServerForAppDir(appDir: string) {
+  const state = await readReviewServerState(appDir);
+  if (state) {
+    return await stopReviewServerProcess(state);
+  }
+  const pid = await readReviewServerPid(appDir);
+  if (!pid) {
+    return false;
+  }
+  return await stopReviewServerProcess({
+    pid,
+    url: "",
+    appDir,
+    reviewId: resolve(appDir).split(sep).at(-1) ?? "unknown",
+    startedAt: new Date(0).toISOString(),
+  });
+}
+
 async function stopActiveReviewServers(cwd: string) {
   const reviewRoot = `${join(resolve(cwd), ".lgtm")}${sep}`;
   const states = [...activeReviewServersByPath.values()].filter((state) =>
@@ -660,7 +803,9 @@ function startReviewFinishWatcher(
       return;
     }
 
-    if (review.status === "open") return;
+    if (review.status === "open") {
+      return;
+    }
     stopReviewFinishWatcher(pointer.reviewPath);
     await ReviewServerLifecycle.stopForReview({ review, reviewPath: pointer.reviewPath }).catch(
       () => false,
@@ -674,7 +819,9 @@ function startReviewFinishWatcher(
 
 function stopReviewFinishWatcher(reviewPath: string) {
   const interval = finishWatchersByReviewPath.get(reviewPath);
-  if (!interval) return;
+  if (!interval) {
+    return;
+  }
   clearInterval(interval);
   finishWatchersByReviewPath.delete(reviewPath);
 }
@@ -682,7 +829,9 @@ function stopReviewFinishWatcher(reviewPath: string) {
 function stopReviewFinishWatchers(cwd: string) {
   const reviewRoot = `${join(resolve(cwd), ".lgtm")}${sep}`;
   for (const reviewPath of finishWatchersByReviewPath.keys()) {
-    if (reviewPath.startsWith(reviewRoot)) stopReviewFinishWatcher(reviewPath);
+    if (reviewPath.startsWith(reviewRoot)) {
+      stopReviewFinishWatcher(reviewPath);
+    }
   }
 }
 
@@ -695,13 +844,17 @@ async function stopReviewServerState(
   const stopped = await stopReviewServerProcess(state);
   cleanupReviewServersByPath.delete(reviewPath);
   activeReviewServersByPath.delete(reviewPath);
-  if (stopped) stopReviewFinishWatcher(reviewPath);
+  if (stopped) {
+    stopReviewFinishWatcher(reviewPath);
+  }
   return stopped;
 }
 
 export async function stopReview(cwd: string, reviewPath: string) {
   const review = await readReviewIfExists(reviewPath);
-  if (!review) return false;
+  if (!review) {
+    return false;
+  }
   stopReviewFinishWatcher(reviewPath);
   return await ReviewServerLifecycle.stopForReview({ review, reviewPath });
 }
@@ -720,16 +873,24 @@ function parseServerPid(value: string) {
 }
 
 async function stopReviewServerProcess(state: ReviewServerState) {
-  if (!(await isLikelyReviewServerProcess(state.pid))) return false;
+  if (!(await isLikelyReviewServerProcess(state.pid))) {
+    return false;
+  }
   killReviewServerPid(state.pid, "SIGTERM");
-  if (await waitForProcessExit(state.pid, 1_500)) return true;
+  if (await waitForProcessExit(state.pid, 1_500)) {
+    return true;
+  }
   killReviewServerPid(state.pid, "SIGKILL");
   return await waitForProcessExit(state.pid, 1_000);
 }
 
 async function isLikelyReviewServerProcess(pid: number) {
-  if (!isProcessRunning(pid)) return false;
-  if (process.platform === "win32") return true;
+  if (!isProcessRunning(pid)) {
+    return false;
+  }
+  if (process.platform === "win32") {
+    return true;
+  }
 
   try {
     const result = await runCommand(
@@ -779,14 +940,18 @@ function killReviewServerPid(pid: number, signal: NodeJS.Signals) {
 async function waitForProcessExit(pid: number, timeoutMs: number) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (!isProcessRunning(pid)) return true;
+    if (!isProcessRunning(pid)) {
+      return true;
+    }
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
   }
   return !isProcessRunning(pid);
 }
 
 function registerProcessCleanup() {
-  if (processCleanupRegistered) return;
+  if (processCleanupRegistered) {
+    return;
+  }
   processCleanupRegistered = true;
   process.once("exit", () => {
     for (const state of cleanupReviewServersByPath.values()) {
@@ -913,7 +1078,9 @@ export async function waitForReview(
 }
 
 function throwIfAborted(signal?: AbortSignal) {
-  if (!signal?.aborted) return;
+  if (!signal?.aborted) {
+    return;
+  }
   throw signal.reason instanceof Error
     ? signal.reason
     : new DOMException("The review was canceled.", "AbortError");
@@ -939,7 +1106,9 @@ function abortableDelay(milliseconds: number, signal?: AbortSignal) {
       resolvePromise();
     }
     signal?.addEventListener("abort", abort, { once: true });
-    if (signal?.aborted) abort();
+    if (signal?.aborted) {
+      abort();
+    }
   });
 }
 
@@ -950,7 +1119,18 @@ export async function finishReview(
   const resolvedCwd = resolve(cwd);
   const reviewPath = resolve(resolvedCwd, reviewPathInput);
   const review = await readReviewIfExists(reviewPath);
-  if (!review) return { found: false };
+  if (!review) {
+    return { found: false };
+  }
+  if (review.status === "open") {
+    return {
+      found: true,
+      reviewPath,
+      review,
+      stoppedServer: false,
+      formattedReview: formatReviewForModel(review, reviewPath),
+    };
+  }
   stopReviewFinishWatcher(reviewPath);
   const stoppedServer = await ReviewServerLifecycle.stopForReview({ review, reviewPath });
   return {

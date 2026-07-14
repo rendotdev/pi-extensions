@@ -63,7 +63,9 @@ function waitUntilAborted() {
           reject(options.signal?.reason ?? new Error("Review aborted."));
         }
         options.signal?.addEventListener("abort", abort, { once: true });
-        if (options.signal?.aborted) abort();
+        if (options.signal?.aborted) {
+          abort();
+        }
       }),
   );
 }

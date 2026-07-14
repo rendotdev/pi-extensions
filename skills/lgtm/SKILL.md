@@ -19,16 +19,21 @@ Prefer the bundled MCP tools when they are available. They keep the tool call op
 
 Use the matching source-specific open tool after the work is ready and validated. Do not open a duplicate while the human is reviewing.
 
+The `.lgtm/` directory contains local review state and preferences. Ensure `.lgtm/` is listed in the reviewed repository's `.gitignore` so these files are never committed.
+
 When MCP tools are unavailable, running `lgtm review --name "Review current changes"` is a possible CLI path. Run `lgtm --help`, then use the equivalent command:
 
 Use one command that matches the work being reviewed:
 
 ```bash
 lgtm review --name "Review current changes"
+lgtm review --since-last --name "Review follow-up changes"
 lgtm review worktree ../feature-worktree --name "Review feature worktree"
 lgtm review document PLAN.md --name "Review implementation plan"
 lgtm review json review.json --name "Review generated changes"
 ```
+
+Use `--since-last` after addressing feedback when the human should see only changes made after the previous compatible diff review. LGTM uses the newest approved or changes-requested review and ignores open or canceled reviews.
 
 - `git` reviews staged, unstaged, and untracked text changes in the selected checkout.
 - `worktree` reviews Git changes in the supplied worktree path.
@@ -48,4 +53,4 @@ Add `--cwd <path>` when the review belongs to a different workspace. Add `--json
    - `PTAL: <path>` points to the saved `review.json`. Read that exact file, apply every actionable comment, validate the revision, and reopen when another approval is required.
    - Cancel is not approval. Preserve the work and wait when continuing would require approval.
 
-Use `lgtm review result --review-path <path> --cwd <path>` to recover that exact result and stop only its server when the automatic handoff is missing or the user asks to stop the review. Never read the result of an active review as part of unrelated development checks.
+Use `lgtm review result --review-path <path> --cwd <path>` after the human decides, or to recover an exact result when the automatic handoff is missing. An open result leaves its server running; `approved`, `changes_requested`, and `canceled` stop only that review's server. Never read the result of an active review as part of unrelated development checks.

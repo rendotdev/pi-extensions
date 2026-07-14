@@ -46,7 +46,9 @@ export class ReviewApiRouterClass extends DomainClass<ReviewApiRouterParams, Rev
 
   public async handle(params: ApiRouteRequest): Promise<boolean> {
     for (const route of this.routes) {
-      if (await route.handle(params)) return true;
+      if (await route.handle(params)) {
+        return true;
+      }
     }
     return false;
   }

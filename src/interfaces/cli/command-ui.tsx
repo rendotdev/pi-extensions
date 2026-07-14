@@ -38,12 +38,14 @@ export class CommandUiRendererClass extends DomainClass<
 > {
   public async run<Result>(params: {
     label: string;
+    successLabel?: string;
     execute: (report: (label: string) => void) => Promise<Result>;
     renderSuccess: (result: Result) => string;
   }): Promise<Result> {
+    const successLabel = params.successLabel ?? params.label;
     if (!this.deps.stdout.isTTY) {
       const result = await params.execute(function ignoreReport() {});
-      this.deps.stdout.write(`✔ ${params.label}\n${params.renderSuccess(result)}\n`);
+      this.deps.stdout.write(`✔ ${successLabel}\n${params.renderSuccess(result)}\n`);
       return result;
     }
 
@@ -58,7 +60,7 @@ export class CommandUiRendererClass extends DomainClass<
     try {
       const result = await params.execute(report);
       instance.rerender(
-        <CommandUi state="success" label={params.label} detail={params.renderSuccess(result)} />,
+        <CommandUi state="success" label={successLabel} detail={params.renderSuccess(result)} />,
       );
       await instance.waitUntilRenderFlush();
       instance.unmount();

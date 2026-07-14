@@ -5,8 +5,9 @@ export class ToastNotificationsClass extends DomainClass<
   {},
   { showDanger: (message: string) => unknown }
 > {
-  public preferencesNotSaved(): void {
-    void this.deps.showDanger("Preferences not saved");
+  public preferencesNotSaved(params: { error: unknown }): void {
+    const detail = params.error instanceof Error ? params.error.message : String(params.error);
+    void this.deps.showDanger(`Preferences not saved: ${detail}`);
   }
 
   public preferencesUnavailable(): void {

@@ -54,7 +54,9 @@ export class LgtmDevEnvironmentClass extends DomainClass<
   }
 
   public async stop() {
-    if (!this.review) return false;
+    if (!this.review) {
+      return false;
+    }
     this.stopPromise ??= this.deps.stopReview(this.params.cwd, this.review.reviewPath);
     return await this.stopPromise;
   }
@@ -99,6 +101,7 @@ export default defineConfig(async ({ command, mode }): Promise<ViteUserConfig> =
       ignorePatterns: ["dist/**", ".lgtm/**"],
       jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }],
       rules: {
+        curly: ["error", "all"],
         "func-style": ["error", "declaration", { allowArrowFunctions: false }],
         "vite-plus/prefer-vite-plus-imports": "error",
       },

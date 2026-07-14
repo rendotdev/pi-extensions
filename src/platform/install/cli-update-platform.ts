@@ -105,7 +105,9 @@ export class CliUpdaterClass extends DomainClass<{ packageRoot: string }, CliUpd
 
   public async update(): Promise<CliUpdateResult> {
     const result = this.plan();
-    if (result.status === "updated") await this.deps.runCommand(result.step);
+    if (result.status === "updated") {
+      await this.deps.runCommand(result.step);
+    }
     return result;
   }
 }
@@ -120,7 +122,9 @@ export class PackageRootFinderClass extends DomainClass<{}, PackageRootFinderDep
         const manifest = JSON.parse(this.deps.readFileSync(packageJson, "utf8")) as {
           name?: unknown;
         };
-        if (manifest.name === "@rendotdev/lgtm") return directory;
+        if (manifest.name === "@rendotdev/lgtm") {
+          return directory;
+        }
       }
       directory = dirname(directory);
     }

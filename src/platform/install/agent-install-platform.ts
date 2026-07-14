@@ -23,7 +23,9 @@ export type AgentUpdateResult = {
 export class AgentInstallerClass extends DomainClass<{}, AgentInstallDependencies> {
   public async install(params: { target: AgentInstallTarget }): Promise<AgentInstallStep[]> {
     const steps = AgentInstallPlanner.createPlan(params);
-    for (const step of steps) await this.deps.runCommand(step);
+    for (const step of steps) {
+      await this.deps.runCommand(step);
+    }
     return steps;
   }
 }
@@ -33,9 +35,11 @@ async function runCommand(step: AgentInstallStep): Promise<void> {
     const child = spawn(step.command, step.args, { stdio: "inherit" });
     child.once("error", reject);
     child.once("exit", (code, signal) => {
-      if (code === 0) resolve();
-      else
+      if (code === 0) {
+        resolve();
+      } else {
         reject(new Error(`${step.command} exited with ${signal ?? `code ${code ?? "unknown"}`}.`));
+      }
     });
   });
 }
@@ -55,7 +59,9 @@ export class AgentUpdaterClass extends DomainClass<{}, AgentUpdateDependencies> 
     const steps = installed
       .filter((result) => result.installed)
       .flatMap((result) => AgentUpdatePlanner.createPlan({ target: result.target }));
-    for (const step of steps) await this.deps.runCommand(step);
+    for (const step of steps) {
+      await this.deps.runCommand(step);
+    }
     return { steps, skippedTargets };
   }
 
@@ -92,8 +98,11 @@ async function readCommand(params: { command: string; args: string[] }): Promise
     });
     child.once("error", reject);
     child.once("exit", (code) => {
-      if (code === 0) resolve(output);
-      else reject(new Error(`${params.command} exited with code ${code ?? "unknown"}.`));
+      if (code === 0) {
+        resolve(output);
+      } else {
+        reject(new Error(`${params.command} exited with code ${code ?? "unknown"}.`));
+      }
     });
   });
 }

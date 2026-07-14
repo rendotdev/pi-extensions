@@ -7,7 +7,9 @@ export class ReviewPutApiRouteClass extends ApiRouteClass<{ reviewPath: string }
   }
 
   public async handle(params: ApiRouteRequest): Promise<boolean> {
-    if (!this.matches(params, "PUT", "/api/review")) return false;
+    if (!this.matches(params, "PUT", "/api/review")) {
+      return false;
+    }
     const review = await this.readRequest({ request: params.request, schema: reviewSchema });
     const nextReview = await this.writeFile({
       path: this.params.reviewPath,

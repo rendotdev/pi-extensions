@@ -48,9 +48,13 @@ for (const entry of updates) {
   const before = `${JSON.stringify(json, null, 2)}\n`;
   entry.update(json);
   const after = `${JSON.stringify(json, null, 2)}\n`;
-  if (before === after) continue;
+  if (before === after) {
+    continue;
+  }
   changed.push(entry.path);
-  if (!checkOnly) await writeFile(resolve(root, entry.path), after);
+  if (!checkOnly) {
+    await writeFile(resolve(root, entry.path), after);
+  }
 }
 
 if (checkOnly && changed.length > 0) {
@@ -71,17 +75,23 @@ function updateMarketplace(
   expectedVersion: string,
   includeEntryVersion: boolean,
 ) {
-  if (!Array.isArray(json.plugins)) throw new Error("Marketplace must define a plugins array.");
+  if (!Array.isArray(json.plugins)) {
+    throw new Error("Marketplace must define a plugins array.");
+  }
   const plugin = json.plugins.find(
     (candidate): candidate is JsonObject => isJsonObject(candidate) && candidate.name === "lgtm",
   );
-  if (!plugin) throw new Error("Marketplace must define the lgtm plugin.");
+  if (!plugin) {
+    throw new Error("Marketplace must define the lgtm plugin.");
+  }
   if (!isJsonObject(plugin.source) || plugin.source.source !== "npm") {
     throw new Error("LGTM marketplace source must use npm.");
   }
   plugin.source.package = expectedPackage;
   plugin.source.version = expectedVersion;
-  if (includeEntryVersion) plugin.version = expectedVersion;
+  if (includeEntryVersion) {
+    plugin.version = expectedVersion;
+  }
 }
 
 function isJsonObject(value: unknown): value is JsonObject {

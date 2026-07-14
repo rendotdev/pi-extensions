@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { applyEdits, modify, parse, type ParseError } from "jsonc-parser";
 import { DomainClass } from "../../domain/domain-class.ts";
 import {
@@ -16,7 +17,9 @@ export class LgtmPreferencesPlatformClass extends DomainClass<{ cwd: string }, {
 
   public async read(): Promise<LgtmPreferences> {
     const source = await this.readSource();
-    if (source === undefined) return { ...LgtmPreferencesDomain.defaults };
+    if (source === undefined) {
+      return { ...LgtmPreferencesDomain.defaults };
+    }
     return LgtmPreferencesDomain.parse({ value: this.parseSource({ source }) });
   }
 
@@ -24,11 +27,29 @@ export class LgtmPreferencesPlatformClass extends DomainClass<{ cwd: string }, {
     const preferences = LgtmPreferencesDomain.parse({ value: params.preferences });
     const source = (await this.readSource()) ?? "{}\n";
     this.parseSource({ source });
-    const edits = modify(source, ["diffStyle"], preferences.diffStyle, {
-      formattingOptions: { insertSpaces: true, tabSize: 2, eol: "\n" },
-    });
+    const formattingOptions = { insertSpaces: true, tabSize: 2, eol: "\n" };
+    const diffStyleSource = applyEdits(
+      source,
+      modify(source, ["diffStyle"], preferences.diffStyle, { formattingOptions }),
+    );
+    const lineWrapSource = applyEdits(
+      diffStyleSource,
+      modify(diffStyleSource, ["lineWrap"], preferences.lineWrap, { formattingOptions }),
+    );
+    const updatedSource = applyEdits(
+      lineWrapSource,
+      modify(lineWrapSource, ["sidebarWidth"], preferences.sidebarWidth, {
+        formattingOptions,
+      }),
+    );
     await mkdir(join(this.params.cwd, ".lgtm"), { recursive: true });
-    await writeFile(this.path, applyEdits(source, edits), "utf8");
+    const temporaryPath = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporaryPath, updatedSource, "utf8");
+      await rename(temporaryPath, this.path);
+    } finally {
+      await rm(temporaryPath, { force: true });
+    }
     return preferences;
   }
 
@@ -36,7 +57,9 @@ export class LgtmPreferencesPlatformClass extends DomainClass<{ cwd: string }, {
     try {
       return await readFile(this.path, "utf8");
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return undefined;
+      }
       throw error;
     }
   }
@@ -44,7 +67,9 @@ export class LgtmPreferencesPlatformClass extends DomainClass<{ cwd: string }, {
   private parseSource(params: { source: string }) {
     const errors: ParseError[] = [];
     const value = parse(params.source, errors, { allowTrailingComma: true });
-    if (errors.length > 0) throw new Error("Unable to parse .lgtm/lgtm.jsonc.");
+    if (errors.length > 0) {
+      throw new Error("Unable to parse .lgtm/lgtm.jsonc.");
+    }
     return value as unknown;
   }
 }
