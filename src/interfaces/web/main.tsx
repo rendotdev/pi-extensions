@@ -792,42 +792,41 @@ function App() {
                 <InputGroup
                   variant="secondary"
                   aria-label="Review JSON path"
-                  className="group/review-path w-64 max-w-[45vw] shrink-0 !bg-transparent shadow-none"
+                  className="group/review-path relative w-64 max-w-[45vw] shrink-0 !bg-transparent shadow-none"
                 >
                   <InputGroup.Input
                     readOnly
+                    dir="rtl"
                     value={displayedReviewPath}
-                    className="min-w-0 font-mono text-xs text-muted"
+                    className="min-w-0 text-right font-mono text-xs text-muted"
                     onFocus={(event) => event.currentTarget.select()}
                   />
-                  <InputGroup.Suffix className="px-1">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 min-w-0 px-2 font-normal opacity-0 transition-opacity group-hover/review-path:opacity-100 focus-visible:opacity-100"
-                      onClick={copyReviewPath}
-                      aria-label="Copy review JSON path"
-                    >
-                      {copiedReviewPath ? (
-                        <Check
-                          size={reviewIconSize}
-                          strokeWidth={reviewIconStrokeWidth}
-                          absoluteStrokeWidth
-                          aria-hidden="true"
-                        />
-                      ) : (
-                        <CopyIcon
-                          size={reviewIconSize}
-                          strokeWidth={reviewIconStrokeWidth}
-                          absoluteStrokeWidth
-                          aria-hidden="true"
-                        />
-                      )}
-                      <Typography type="body-xs" weight="normal" className="leading-none">
-                        {copiedReviewPath ? "Copied" : "Copy"}
-                      </Typography>
-                    </Button>
-                  </InputGroup.Suffix>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="absolute right-1 top-1/2 h-7 min-w-0 -translate-y-1/2 bg-background px-2 font-normal opacity-0 transition-opacity group-hover/review-path:opacity-100 focus-visible:opacity-100"
+                    onClick={copyReviewPath}
+                    aria-label="Copy review JSON path"
+                  >
+                    {copiedReviewPath ? (
+                      <Check
+                        size={reviewIconSize}
+                        strokeWidth={reviewIconStrokeWidth}
+                        absoluteStrokeWidth
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <CopyIcon
+                        size={reviewIconSize}
+                        strokeWidth={reviewIconStrokeWidth}
+                        absoluteStrokeWidth
+                        aria-hidden="true"
+                      />
+                    )}
+                    <Typography type="body-xs" weight="normal" className="leading-none">
+                      {copiedReviewPath ? "Copied" : "Copy"}
+                    </Typography>
+                  </Button>
                 </InputGroup>
               </div>
               <div className="mt-3 flex min-w-0 flex-wrap items-center justify-between gap-3">
