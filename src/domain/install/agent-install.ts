@@ -43,7 +43,7 @@ export class AgentInstallPlannerClass extends DomainClass<{}, {}> {
   }
 }
 
-export const agentInstallPlanner = new AgentInstallPlannerClass({}, {});
+export const AgentInstallPlanner = new AgentInstallPlannerClass({}, {});
 
 export class AgentUpdatePlannerClass extends DomainClass<{}, {}> {
   public createPlan(params: { target: AgentInstallTarget }): AgentInstallStep[] {
@@ -67,7 +67,7 @@ export class AgentUpdatePlannerClass extends DomainClass<{}, {}> {
   }
 }
 
-export const agentUpdatePlanner = new AgentUpdatePlannerClass({}, {});
+export const AgentUpdatePlanner = new AgentUpdatePlannerClass({}, {});
 
 export function isAgentInstallTarget(value: string): value is AgentInstallTarget {
   return agentInstallTargets.includes(value as AgentInstallTarget);

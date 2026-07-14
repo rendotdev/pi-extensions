@@ -210,7 +210,7 @@ async function openAndWait(
 export function createMcpToolHandler(dependencies: McpRuntimeDependencies = defaultDependencies) {
   const activeOpensByCwd = new Map<string, { controller: AbortController; reviewPath?: string }>();
 
-  const openBlockingReview = async (input: OpenReviewInput, cwd: string, signal: AbortSignal) => {
+  async function openBlockingReview(input: OpenReviewInput, cwd: string, signal: AbortSignal) {
     if (activeOpensByCwd.has(cwd)) {
       throw new Error(`An LGTM review is already pending for ${cwd}.`);
     }
@@ -226,14 +226,14 @@ export function createMcpToolHandler(dependencies: McpRuntimeDependencies = defa
     } finally {
       if (activeOpensByCwd.get(cwd) === activeOpen) activeOpensByCwd.delete(cwd);
     }
-  };
+  }
 
-  const abortActiveOpen = (cwd: string, reviewPath: string | undefined, message: string) => {
+  function abortActiveOpen(cwd: string, reviewPath: string | undefined, message: string) {
     const activeOpen = activeOpensByCwd.get(cwd);
     if (!activeOpen) return;
     if (reviewPath && activeOpen.reviewPath !== reviewPath) return;
     activeOpen.controller.abort(new DOMException(message, "AbortError"));
-  };
+  }
 
   return async (name: string, argumentsValue: unknown, signal: AbortSignal) => {
     const args =
@@ -313,7 +313,9 @@ function toolResult(value: unknown) {
 
 export async function runMcpServer() {
   const lines = createInterface({ input: process.stdin, crlfDelay: Number.POSITIVE_INFINITY });
-  const send = (value: unknown) => process.stdout.write(`${JSON.stringify(value)}\n`);
+  function send(value: unknown) {
+    return process.stdout.write(`${JSON.stringify(value)}\n`);
+  }
   const server = createMcpMessageHandler(send);
 
   for await (const line of lines) server.handleLine(line);
@@ -325,11 +327,14 @@ export function createMcpMessageHandler(
   callTool = createMcpToolHandler(),
 ) {
   const calls = new Map<JsonRpcId, AbortController>();
-  const respond = (id: JsonRpcId, result: unknown) => send({ jsonrpc: "2.0", id, result });
-  const respondError = (id: JsonRpcId, code: number, message: string) =>
-    send({ jsonrpc: "2.0", id, error: { code, message } });
+  function respond(id: JsonRpcId, result: unknown) {
+    return send({ jsonrpc: "2.0", id, result });
+  }
+  function respondError(id: JsonRpcId, code: number, message: string) {
+    return send({ jsonrpc: "2.0", id, error: { code, message } });
+  }
 
-  const handleLine = (line: string) => {
+  function handleLine(line: string) {
     if (!line.trim()) return;
     let parsed: unknown;
     try {
@@ -392,13 +397,13 @@ export function createMcpMessageHandler(
         }),
       )
       .finally(() => calls.delete(id));
-  };
+  }
 
-  const close = () => {
+  function close() {
     for (const controller of calls.values()) {
       controller.abort(new DOMException("MCP transport closed.", "AbortError"));
     }
-  };
+  }
 
   return { close, handleLine };
 }

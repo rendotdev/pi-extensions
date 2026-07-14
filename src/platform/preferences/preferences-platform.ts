@@ -2,7 +2,10 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { applyEdits, modify, parse, type ParseError } from "jsonc-parser";
 import { DomainClass } from "../../domain/domain-class.ts";
-import { lgtmPreferences, type LgtmPreferences } from "../../domain/preferences/preferences.ts";
+import {
+  LgtmPreferences as LgtmPreferencesDomain,
+  type LgtmPreferences,
+} from "../../domain/preferences/preferences.ts";
 
 export class LgtmPreferencesPlatformClass extends DomainClass<{ cwd: string }, {}> {
   public readonly path: string;
@@ -13,12 +16,12 @@ export class LgtmPreferencesPlatformClass extends DomainClass<{ cwd: string }, {
 
   public async read(): Promise<LgtmPreferences> {
     const source = await this.readSource();
-    if (source === undefined) return { ...lgtmPreferences.defaults };
-    return lgtmPreferences.parse({ value: this.parseSource({ source }) });
+    if (source === undefined) return { ...LgtmPreferencesDomain.defaults };
+    return LgtmPreferencesDomain.parse({ value: this.parseSource({ source }) });
   }
 
   public async write(params: { preferences: LgtmPreferences }): Promise<LgtmPreferences> {
-    const preferences = lgtmPreferences.parse({ value: params.preferences });
+    const preferences = LgtmPreferencesDomain.parse({ value: params.preferences });
     const source = (await this.readSource()) ?? "{}\n";
     this.parseSource({ source });
     const edits = modify(source, ["diffStyle"], preferences.diffStyle, {

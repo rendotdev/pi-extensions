@@ -3,10 +3,10 @@ import { ReviewHandoffClass } from "../../domain/review/review-handoff.ts";
 
 describe("ReviewHandoffClass", () => {
   it("preserves unsaved diff comments in an agent-ready clipboard handoff", () => {
-    const handoff = new ReviewHandoffClass({}, {});
+    const Handoff = new ReviewHandoffClass({}, {});
 
     expect(
-      handoff.fallbackText({
+      Handoff.fallbackText({
         review: {
           kind: "diff",
           name: "Authentication review",
@@ -48,10 +48,10 @@ Selected text:
   });
 
   it("preserves document comments and their source range", () => {
-    const handoff = new ReviewHandoffClass({}, {});
+    const Handoff = new ReviewHandoffClass({}, {});
 
     expect(
-      handoff.fallbackText({
+      Handoff.fallbackText({
         review: {
           kind: "document",
           name: "Skill draft",
@@ -72,7 +72,7 @@ Selected text:
   });
 
   it("formats concise clipboard handoffs for each review outcome", () => {
-    const handoff = new ReviewHandoffClass({}, {});
+    const Handoff = new ReviewHandoffClass({}, {});
     const review = {
       kind: "diff" as const,
       name: "Authentication review",
@@ -93,10 +93,10 @@ Selected text:
       documentComments: [],
     };
 
-    expect(handoff.clipboardText({ decision: "approved", review })).toBe(
+    expect(Handoff.clipboardText({ decision: "approved", review })).toBe(
       "LGTM, approving the following changes: /Users/example/project/.lgtm/session/review.json",
     );
-    expect(handoff.clipboardText({ decision: "changes_requested", review })).toBe(
+    expect(Handoff.clipboardText({ decision: "changes_requested", review })).toBe(
       "PTAL, requesting the following changes: /Users/example/project/.lgtm/session/review.json",
     );
   });

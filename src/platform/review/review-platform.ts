@@ -7,9 +7,9 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { DomainClass } from "../../domain/domain-class.ts";
 import {
-  reviewBuilder,
-  reviewFormatter,
-  reviewSourceBuilder,
+  ReviewBuilder,
+  ReviewFormatter,
+  ReviewSourceBuilder,
   type DiffReviewFileInput,
   type OpenReviewInput,
   type ReviewJson,
@@ -141,8 +141,8 @@ const abortCleanupByReviewPath = new Map<string, () => void>();
 const finishWatchersByReviewPath = new Map<string, ReturnType<typeof setInterval>>();
 let processCleanupRegistered = false;
 
-const reviewIdentifier = new ReviewIdentifierClass({}, {});
-const reviewServerLifecycle = new ReviewServerLifecycleClass(
+const ReviewIdentifier = new ReviewIdentifierClass({}, {});
+const ReviewServerLifecycle = new ReviewServerLifecycleClass(
   {},
   {
     activeReviewServersByPath,
@@ -178,7 +178,7 @@ export async function openReview(
   options: OpenReviewOptions,
 ): Promise<ReviewPointer> {
   const cwd = resolve(options.cwd);
-  const sessionId = reviewIdentifier.sanitizePathSegment({
+  const sessionId = ReviewIdentifier.sanitizePathSegment({
     value: options.sessionId ?? `cli-${process.pid}`,
   });
   const reviewUUID = randomUUID();
@@ -187,7 +187,7 @@ export async function openReview(
   const reviewPath = join(appDir, "review.json");
   const generatedAt = new Date().toISOString();
   const files = (input.files ?? []).map((file, index) =>
-    reviewSourceBuilder.build({ file, index }),
+    ReviewSourceBuilder.build({ file, index }),
   );
 
   if (options.replaceActiveReview === true) {
@@ -196,7 +196,7 @@ export async function openReview(
   }
   await mkdir(appDir, { recursive: true });
 
-  const review = reviewBuilder.build({
+  const review = ReviewBuilder.build({
     kind: input.kind,
     name: input.name,
     sessionId: sessionId,
@@ -246,7 +246,9 @@ export async function openReview(
       activeReviewServersByPath.set(reviewPath, serverState);
     }
     if (options.signal && options.trackAsActiveReview !== false) {
-      const abort = () => void stopReview(cwd, reviewPath);
+      function abort() {
+        void stopReview(cwd, reviewPath);
+      }
       options.signal.addEventListener("abort", abort, { once: true });
       abortCleanupByReviewPath.set(reviewPath, () =>
         options.signal?.removeEventListener("abort", abort),
@@ -452,22 +454,22 @@ async function startReviewServer(
     let stderr = "";
     let settled = false;
 
-    const abort = () => {
+    function abort() {
       cleanup();
       if (child.pid) killReviewServerPid(child.pid, "SIGTERM");
       else child.kill();
       rejectPromise(new Error("Cancelled while starting LGTM review server."));
-    };
+    }
 
-    const cleanup = () => {
+    function cleanup() {
       clearTimeout(timeout);
       signal?.removeEventListener("abort", abort);
       child.stdout?.off("data", onStdout);
       child.stderr?.off("data", onStderr);
       child.off("exit", onExit);
-    };
+    }
 
-    const finish = async (url: string) => {
+    async function finish(url: string) {
       if (settled) return;
       const pid = child.pid;
       if (!pid) {
@@ -485,28 +487,28 @@ async function startReviewServer(
       }
       await writeFile(join(appDir, "server.pid"), `${pid}\n`, "utf8");
       resolvePromise({ url, pid });
-    };
+    }
 
-    const onStdout = (chunk: Buffer) => {
+    function onStdout(chunk: Buffer) {
       const text = chunk.toString("utf8");
       const match = text.match(/LGTM_REVIEW_URL=(\S+)/);
       if (match?.[1]) {
         void finish(match[1]);
       }
-    };
+    }
 
-    const onStderr = (chunk: Buffer) => {
+    function onStderr(chunk: Buffer) {
       stderr += chunk.toString("utf8");
-    };
+    }
 
-    const onExit = (code: number | null) => {
+    function onExit(code: number | null) {
       if (settled) return;
       settled = true;
       cleanup();
       rejectPromise(
         new Error(`LGTM review server exited with code ${code ?? "unknown"}.\n${stderr}`),
       );
-    };
+    }
 
     signal?.addEventListener("abort", abort, { once: true });
     child.stdout?.on("data", onStdout);
@@ -520,13 +522,13 @@ export async function serveReviewApp(appDirInput: string): Promise<void> {
   const payloadPath = join(appDir, "payload.json");
   const reviewPath = join(appDir, "review.json");
   const payload = reviewPayloadSchema.parse(await readJsonFile<ReviewPayload>(payloadPath));
-  const preferencesPlatform = new LgtmPreferencesPlatformClass({ cwd: payload.cwd }, {});
+  const PreferencesPlatform = new LgtmPreferencesPlatformClass({ cwd: payload.cwd }, {});
   const webRoot = await WebRootResolver.resolve();
   let server: ReturnType<typeof createServer>;
-  const apiRouter = new ReviewApiRouterClass(
+  const ApiRouter = new ReviewApiRouterClass(
     { payloadPath, reviewPath },
     {
-      preferencesPlatform,
+      preferencesPlatform: PreferencesPlatform,
       closeServer: () => {
         server.close(() => process.exit(0));
         const forceExit = setTimeout(() => process.exit(0), 1_000);
@@ -539,15 +541,15 @@ export async function serveReviewApp(appDirInput: string): Promise<void> {
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
 
-      if (await apiRouter.handle({ request, response, url })) return;
+      if (await ApiRouter.handle({ request, response, url })) return;
 
       if (request.method === "GET") {
         return await sendStaticFile(response, webRoot, url.pathname);
       }
 
-      apiRouter.sendError({ response, status: 404, error: "Not found." });
+      ApiRouter.sendError({ response, status: 404, error: "Not found." });
     } catch (error) {
-      apiRouter.sendError({ response, status: 400, error });
+      ApiRouter.sendError({ response, status: 400, error });
     }
   });
 
@@ -660,9 +662,9 @@ function startReviewFinishWatcher(
 
     if (review.status === "open") return;
     stopReviewFinishWatcher(pointer.reviewPath);
-    await reviewServerLifecycle
-      .stopForReview({ review, reviewPath: pointer.reviewPath })
-      .catch(() => false);
+    await ReviewServerLifecycle.stopForReview({ review, reviewPath: pointer.reviewPath }).catch(
+      () => false,
+    );
     await onFinished(review, formatReviewForModel(review, pointer.reviewPath));
   }, 1_000);
 
@@ -701,7 +703,7 @@ export async function stopReview(cwd: string, reviewPath: string) {
   const review = await readReviewIfExists(reviewPath);
   if (!review) return false;
   stopReviewFinishWatcher(reviewPath);
-  return await reviewServerLifecycle.stopForReview({ review, reviewPath });
+  return await ReviewServerLifecycle.stopForReview({ review, reviewPath });
 }
 
 async function readReviewServerPid(appDir: string) {
@@ -809,10 +811,10 @@ function runCommand(
       rejectPromise(new Error(`${command} timed out after ${timeoutMs}ms.`));
     }, timeoutMs);
 
-    const abort = () => {
+    function abort() {
       child.kill();
       rejectPromise(new Error(`${command} cancelled.`));
-    };
+    }
 
     signal?.addEventListener("abort", abort, { once: true });
     child.stdout?.on("data", (chunk) => {
@@ -892,7 +894,7 @@ export async function waitForReview(
         const stoppedServer =
           options.stopServer === false
             ? false
-            : await reviewServerLifecycle.stopForReview({ review, reviewPath: pointer.reviewPath });
+            : await ReviewServerLifecycle.stopForReview({ review, reviewPath: pointer.reviewPath });
         return {
           reviewPath: pointer.reviewPath,
           review: review as ReviewJson & { status: ReviewOutcome },
@@ -920,18 +922,18 @@ function throwIfAborted(signal?: AbortSignal) {
 function abortableDelay(milliseconds: number, signal?: AbortSignal) {
   return new Promise<void>((resolvePromise, rejectPromise) => {
     const timeout = setTimeout(finish, milliseconds);
-    const abort = () => {
+    function abort() {
       cleanup();
       rejectPromise(
         signal?.reason instanceof Error
           ? signal.reason
           : new DOMException("The review was canceled.", "AbortError"),
       );
-    };
-    const cleanup = () => {
+    }
+    function cleanup() {
       clearTimeout(timeout);
       signal?.removeEventListener("abort", abort);
-    };
+    }
     function finish() {
       cleanup();
       resolvePromise();
@@ -950,7 +952,7 @@ export async function finishReview(
   const review = await readReviewIfExists(reviewPath);
   if (!review) return { found: false };
   stopReviewFinishWatcher(reviewPath);
-  const stoppedServer = await reviewServerLifecycle.stopForReview({ review, reviewPath });
+  const stoppedServer = await ReviewServerLifecycle.stopForReview({ review, reviewPath });
   return {
     found: true,
     reviewPath,
@@ -967,5 +969,5 @@ export async function stopReviews(cwd: string) {
 }
 
 export function formatReviewForModel(review: ReviewJson, reviewPath: string): string {
-  return reviewFormatter.format({ review, reviewPath });
+  return ReviewFormatter.format({ review, reviewPath });
 }

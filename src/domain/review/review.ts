@@ -230,7 +230,7 @@ export class ReviewSourceBuilderClass extends DomainClass<{}, {}> {
   }
 }
 
-export const reviewSourceBuilder = new ReviewSourceBuilderClass({}, {});
+export const ReviewSourceBuilder = new ReviewSourceBuilderClass({}, {});
 
 export class ReviewBuilderClass extends DomainClass<{}, {}> {
   public build(
@@ -269,7 +269,7 @@ export class ReviewBuilderClass extends DomainClass<{}, {}> {
   }
 }
 
-export const reviewBuilder = new ReviewBuilderClass({}, {});
+export const ReviewBuilder = new ReviewBuilderClass({}, {});
 
 export class ReviewFormatterClass extends DomainClass<{}, {}> {
   public format(params: { review: ReviewJson; reviewPath: string }) {
@@ -352,4 +352,4 @@ export class ReviewFormatterClass extends DomainClass<{}, {}> {
   }
 }
 
-export const reviewFormatter = new ReviewFormatterClass({}, {});
+export const ReviewFormatter = new ReviewFormatterClass({}, {});

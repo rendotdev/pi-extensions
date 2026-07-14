@@ -26,4 +26,4 @@ export class LgtmPreferencesClass extends DomainClass<{}, {}> {
   }
 }
 
-export const lgtmPreferences = new LgtmPreferencesClass({}, {});
+export const LgtmPreferences = new LgtmPreferencesClass({}, {});

@@ -95,12 +95,12 @@ describe("WebRootResolverClass", () => {
       if (path === "/project/dist/web/index.html") return;
       throw new Error("Missing frontend");
     });
-    const resolver = new WebRootResolverClass(
+    const Resolver = new WebRootResolverClass(
       {},
       { modulePath: () => "/project/src/platform/review/review-platform.ts", stat },
     );
 
-    await expect(resolver.resolve()).resolves.toBe("/project/dist/web");
+    await expect(Resolver.resolve()).resolves.toBe("/project/dist/web");
     expect(stat).toHaveBeenCalledWith("/project/dist/web/index.html");
   });
 });
@@ -108,23 +108,23 @@ describe("WebRootResolverClass", () => {
 describe("BuiltCliPathResolverClass", () => {
   it("uses the built CLI when running from source", async () => {
     const stat = vi.fn(async () => undefined);
-    const resolver = new BuiltCliPathResolverClass(
+    const Resolver = new BuiltCliPathResolverClass(
       { modulePath: "/project/src/platform/review/review-platform.ts" },
       { stat },
     );
 
-    await expect(resolver.resolve()).resolves.toBe("/project/dist/cli.mjs");
+    await expect(Resolver.resolve()).resolves.toBe("/project/dist/cli.mjs");
     expect(stat).toHaveBeenCalledWith("/project/dist/cli.mjs");
   });
 
   it("uses the current bundled CLI path", async () => {
     const stat = vi.fn(async () => undefined);
-    const resolver = new BuiltCliPathResolverClass(
+    const Resolver = new BuiltCliPathResolverClass(
       { modulePath: "/project/dist/cli.mjs" },
       { stat },
     );
 
-    await expect(resolver.resolve()).resolves.toBe("/project/dist/cli.mjs");
+    await expect(Resolver.resolve()).resolves.toBe("/project/dist/cli.mjs");
     expect(stat).not.toHaveBeenCalled();
   });
 });

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
-import { agentInstallPlanner, agentUpdatePlanner, isAgentInstallTarget } from "./agent-install.ts";
+import { AgentInstallPlanner, AgentUpdatePlanner, isAgentInstallTarget } from "./agent-install.ts";
 
-describe("agentInstallPlanner", () => {
+describe("AgentInstallPlanner", () => {
   it("plans every supported integration in installation order", () => {
-    expect(agentInstallPlanner.createPlan({ target: "all" })).toEqual([
+    expect(AgentInstallPlanner.createPlan({ target: "all" })).toEqual([
       { target: "pi", command: "pi", args: ["install", "npm:@rendotdev/lgtm"] },
       {
         target: "claude",
@@ -21,7 +21,7 @@ describe("agentInstallPlanner", () => {
   });
 
   it("plans only the requested integration and validates target names", () => {
-    expect(agentInstallPlanner.createPlan({ target: "codex" })).toEqual([
+    expect(AgentInstallPlanner.createPlan({ target: "codex" })).toEqual([
       {
         target: "codex",
         command: "codex",
@@ -34,7 +34,7 @@ describe("agentInstallPlanner", () => {
   });
 
   it("updates every installed integration through its native CLI", () => {
-    expect(agentUpdatePlanner.createPlan({ target: "all" })).toEqual([
+    expect(AgentUpdatePlanner.createPlan({ target: "all" })).toEqual([
       { target: "pi", command: "pi", args: ["update", "npm:@rendotdev/lgtm"] },
       {
         target: "claude",

@@ -11,9 +11,9 @@ describe("ToastNotificationsClass", () => {
     ["cancelFailed", "Cancel failed"],
   ] as const)("shows a minimal message for %s", (method, message) => {
     const showDanger = vi.fn();
-    const notifications = new ToastNotificationsClass({}, { showDanger });
+    const Notifications = new ToastNotificationsClass({}, { showDanger });
 
-    notifications[method]();
+    Notifications[method]();
 
     expect(showDanger).toHaveBeenCalledWith(message);
   });

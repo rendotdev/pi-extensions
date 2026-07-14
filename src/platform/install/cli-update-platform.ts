@@ -22,20 +22,30 @@ type CliUpdateCommandRunnerDependencies = {
   spawn: typeof spawn;
 };
 
+type PackageRootFinderDependencies = {
+  existsSync: typeof existsSync;
+  readFileSync: typeof readFileSync;
+};
+
 export class CliUpdateCommandRunnerClass extends DomainClass<
   {},
   CliUpdateCommandRunnerDependencies
 > {
   public async run(params: CliUpdateStep): Promise<void> {
-    await new Promise<void>((resolvePromise, reject) => {
-      const child = this.deps.spawn(params.command, params.args, {
+    const { spawn: spawnCommand } = this.deps;
+    await new Promise<void>(function runCommand(resolvePromise, reject) {
+      const child = spawnCommand(params.command, params.args, {
         stdio: ["ignore", "pipe", "pipe"],
       });
       const output: Buffer[] = [];
-      child.stdout.on("data", (chunk: Buffer | string) => output.push(Buffer.from(chunk)));
-      child.stderr.on("data", (chunk: Buffer | string) => output.push(Buffer.from(chunk)));
+      child.stdout.on("data", function captureStdout(chunk: Buffer | string) {
+        output.push(Buffer.from(chunk));
+      });
+      child.stderr.on("data", function captureStderr(chunk: Buffer | string) {
+        output.push(Buffer.from(chunk));
+      });
       child.once("error", reject);
-      child.once("exit", (code, signal) => {
+      child.once("exit", function handleExit(code, signal) {
         if (code === 0) {
           resolvePromise();
           return;
@@ -100,23 +110,33 @@ export class CliUpdaterClass extends DomainClass<{ packageRoot: string }, CliUpd
   }
 }
 
-function findPackageRoot(moduleUrl: string): string {
-  let directory = dirname(fileURLToPath(moduleUrl));
-  const root = parse(directory).root;
-  while (directory !== root) {
-    const packageJson = join(directory, "package.json");
-    if (existsSync(packageJson)) {
-      const manifest = JSON.parse(readFileSync(packageJson, "utf8")) as { name?: unknown };
-      if (manifest.name === "@rendotdev/lgtm") return directory;
+export class PackageRootFinderClass extends DomainClass<{}, PackageRootFinderDependencies> {
+  public find(params: { moduleUrl: string }): string {
+    let directory = dirname(fileURLToPath(params.moduleUrl));
+    const root = parse(directory).root;
+    while (directory !== root) {
+      const packageJson = join(directory, "package.json");
+      if (this.deps.existsSync(packageJson)) {
+        const manifest = JSON.parse(this.deps.readFileSync(packageJson, "utf8")) as {
+          name?: unknown;
+        };
+        if (manifest.name === "@rendotdev/lgtm") return directory;
+      }
+      directory = dirname(directory);
     }
-    directory = dirname(directory);
+    throw new Error("Could not locate the LGTM package root.");
   }
-  throw new Error("Could not locate the LGTM package root.");
 }
 
-const cliUpdateCommandRunner = new CliUpdateCommandRunnerClass({}, { spawn });
+const CliUpdateCommandRunner = new CliUpdateCommandRunnerClass({}, { spawn });
+const PackageRootFinder = new PackageRootFinderClass({}, { existsSync, readFileSync });
 
-export const cliUpdater = new CliUpdaterClass(
-  { packageRoot: findPackageRoot(import.meta.url) },
-  { executableExists: existsSync, runCommand: (step) => cliUpdateCommandRunner.run(step) },
+export const CliUpdater = new CliUpdaterClass(
+  { packageRoot: PackageRootFinder.find({ moduleUrl: import.meta.url }) },
+  {
+    executableExists: existsSync,
+    runCommand: function runCommand(step) {
+      return CliUpdateCommandRunner.run(step);
+    },
+  },
 );

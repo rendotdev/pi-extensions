@@ -22,7 +22,7 @@ describe("LgtmPiExtensionClass", () => {
       },
     } as unknown as ExtensionAPI;
     const finishReview = vi.fn(async () => ({ found: false as const }));
-    const extension = new LgtmPiExtensionClass(
+    const Extension = new LgtmPiExtensionClass(
       {},
       {
         collectGitReviewFiles: vi.fn(async () => []),
@@ -44,7 +44,7 @@ describe("LgtmPiExtensionClass", () => {
       },
     );
 
-    extension.register(pi);
+    Extension.register(pi);
 
     expect(tools.map((tool) => tool.name)).toEqual([
       "lgtm-open-git-review",

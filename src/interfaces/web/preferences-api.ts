@@ -19,4 +19,4 @@ export class PreferencesApiClass extends DomainClass<{}, { fetch: typeof fetch }
   }
 }
 
-export const preferencesApi = new PreferencesApiClass({}, { fetch });
+export const PreferencesApi = new PreferencesApiClass({}, { fetch });

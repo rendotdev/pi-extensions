@@ -6,8 +6,9 @@ type JsonObject = Record<string, unknown>;
 const root = resolve(import.meta.dirname, "..");
 const checkOnly = process.argv.includes("--check");
 
-const readJson = async (path: string): Promise<JsonObject> =>
-  JSON.parse(await readFile(resolve(root, path), "utf8")) as JsonObject;
+async function readJson(path: string): Promise<JsonObject> {
+  return JSON.parse(await readFile(resolve(root, path), "utf8")) as JsonObject;
+}
 
 const packageJson = await readJson("package.json");
 const packageName = packageJson.name;

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
-import { reviewBuilder, reviewFormatter, reviewSourceBuilder } from "./review.ts";
+import { ReviewBuilder, ReviewFormatter, ReviewSourceBuilder } from "./review.ts";
 
 describe("review domain", () => {
   it("builds review source metadata from changed content", () => {
-    const source = reviewSourceBuilder.build({
+    const source = ReviewSourceBuilder.build({
       file: {
         location: "src/review.ts",
         oldContent: "one\ntwo",
@@ -21,7 +21,7 @@ describe("review domain", () => {
   });
 
   it("preserves existing comments when rebuilding a review", () => {
-    const existingReview = reviewBuilder.build({
+    const existingReview = ReviewBuilder.build({
       kind: "diff",
       name: "Existing review",
       sessionId: "session",
@@ -32,7 +32,7 @@ describe("review domain", () => {
       reviewPath: "/project/.lgtm/review-id/review.json",
       generatedAt: "2026-07-12T00:00:00.000Z",
       files: [
-        reviewSourceBuilder.build({
+        ReviewSourceBuilder.build({
           file: { location: "file.ts", oldContent: "old", newContent: "new" },
           index: 0,
         }),
@@ -53,12 +53,12 @@ describe("review domain", () => {
       updatedAt: "2026-07-12T00:00:00.000Z",
     });
 
-    const rebuilt = reviewBuilder.build({
+    const rebuilt = ReviewBuilder.build({
       ...existingReview,
       generatedAt: "2026-07-12T00:01:00.000Z",
       existingReview,
       files: [
-        reviewSourceBuilder.build({
+        ReviewSourceBuilder.build({
           file: { location: "file.ts", oldContent: "old", newContent: "newer" },
           index: 0,
         }),
@@ -69,7 +69,7 @@ describe("review domain", () => {
   });
 
   it("formats a completed review for an agent", () => {
-    const review = reviewBuilder.build({
+    const review = ReviewBuilder.build({
       kind: "diff",
       name: "Domain review",
       sessionId: "session",
@@ -83,7 +83,7 @@ describe("review domain", () => {
     });
     review.status = "approved";
 
-    expect(reviewFormatter.format({ review, reviewPath: review.reviewPath })).toContain(
+    expect(ReviewFormatter.format({ review, reviewPath: review.reviewPath })).toContain(
       "Status: approved",
     );
   });

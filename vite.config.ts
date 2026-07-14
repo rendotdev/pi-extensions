@@ -62,7 +62,7 @@ export class LgtmDevEnvironmentClass extends DomainClass<
 
 export default defineConfig(async ({ command, mode }): Promise<ViteUserConfig> => {
   const isDev = command === "serve" && mode !== "test" && !process.argv.includes("preview");
-  const devEnvironment = isDev
+  const DevEnvironment = isDev
     ? new LgtmDevEnvironmentClass(
         {
           cwd: resolve(process.env.LGTM_DEV_CWD ?? process.cwd()),
@@ -71,11 +71,11 @@ export default defineConfig(async ({ command, mode }): Promise<ViteUserConfig> =
         { collectGitReviewFiles, openReview, stopReview },
       )
     : undefined;
-  const devReview = await devEnvironment?.start();
+  const devReview = await DevEnvironment?.start();
 
   return {
     root: "src/interfaces/web",
-    plugins: [tailwindcss(), ...(devEnvironment ? [devEnvironment.plugin()] : [])],
+    plugins: [tailwindcss(), ...(DevEnvironment ? [DevEnvironment.plugin()] : [])],
     server: devReview
       ? {
           proxy: {
@@ -98,13 +98,16 @@ export default defineConfig(async ({ command, mode }): Promise<ViteUserConfig> =
     lint: {
       ignorePatterns: ["dist/**", ".lgtm/**"],
       jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }],
-      rules: { "vite-plus/prefer-vite-plus-imports": "error" },
+      rules: {
+        "func-style": ["error", "declaration", { allowArrowFunctions: false }],
+        "vite-plus/prefer-vite-plus-imports": "error",
+      },
       options: { typeAware: true, typeCheck: true },
     },
     test: {
       include: [
         "./**/*.test.ts",
-        "../cli/**/*.test.ts",
+        "../cli/**/*.test.{ts,tsx}",
         "../mcp/**/*.test.ts",
         "../pi/**/*.test.ts",
         "../../domain/**/*.test.ts",

@@ -11,17 +11,17 @@ import {
 } from "../../platform/review/review-platform.ts";
 import type { ReviewPointer } from "../../domain/review/review.ts";
 import {
-  agentInstallPlanner,
-  agentUpdatePlanner,
+  AgentInstallPlanner,
+  AgentUpdatePlanner,
   isAgentInstallTarget,
   type AgentInstallStep,
   type AgentInstallTarget,
 } from "../../domain/install/agent-install.ts";
-import { agentInstaller, agentUpdater } from "../../platform/install/agent-install-platform.ts";
-import { cliUpdater, type CliUpdateResult } from "../../platform/install/cli-update-platform.ts";
+import { AgentInstaller, AgentUpdater } from "../../platform/install/agent-install-platform.ts";
+import { CliUpdater, type CliUpdateResult } from "../../platform/install/cli-update-platform.ts";
 import { runMcpServer } from "../mcp/mcp.ts";
 import { JsonReviewInputParser } from "./json-review-input.ts";
-import { CommandUiRenderer } from "./command-ui.ts";
+import { CommandUiRenderer } from "./command-ui.tsx";
 
 const args = process.argv.slice(2);
 if (args[0] === "--") args.shift();
@@ -176,7 +176,7 @@ async function main() {
     if (!isAgentInstallTarget(target)) {
       throw new Error("setup --target must be one of: all, pi, claude, codex.");
     }
-    const plan = agentInstallPlanner.createPlan({ target });
+    const plan = AgentInstallPlanner.createPlan({ target });
     if (takeFlag("--dry-run")) {
       await runCommand({
         label: "Planning LGTM setup",
@@ -190,7 +190,7 @@ async function main() {
       execute: async () => ({
         action: "setup" as const,
         target,
-        steps: await agentInstaller.install({ target }),
+        steps: await AgentInstaller.install({ target }),
       }),
       renderSuccess: formatIntegrationResult,
     });
@@ -202,7 +202,7 @@ async function main() {
     if (!isAgentInstallTarget(target)) {
       throw new Error("update --target must be one of: all, pi, claude, codex.");
     }
-    const plan = agentUpdatePlanner.createPlan({ target });
+    const plan = AgentUpdatePlanner.createPlan({ target });
     if (takeFlag("--dry-run")) {
       await runCommand({
         label: "Planning LGTM update",
@@ -210,7 +210,7 @@ async function main() {
           action: "update" as const,
           target,
           steps: plan,
-          cli: cliUpdater.plan(),
+          cli: CliUpdater.plan(),
         }),
         renderSuccess: formatIntegrationResult,
       });
@@ -221,8 +221,8 @@ async function main() {
       execute: async () => ({
         action: "update" as const,
         target,
-        cli: await cliUpdater.update(),
-        ...(await agentUpdater.update({ target })),
+        cli: await CliUpdater.update(),
+        ...(await AgentUpdater.update({ target })),
       }),
       renderSuccess: formatIntegrationResult,
     });

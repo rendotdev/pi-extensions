@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import {
-  agentInstallPlanner,
-  agentUpdatePlanner,
+  AgentInstallPlanner,
+  AgentUpdatePlanner,
   type AgentInstallStep,
   type AgentInstallTarget,
 } from "../../domain/install/agent-install.ts";
@@ -22,7 +22,7 @@ export type AgentUpdateResult = {
 
 export class AgentInstallerClass extends DomainClass<{}, AgentInstallDependencies> {
   public async install(params: { target: AgentInstallTarget }): Promise<AgentInstallStep[]> {
-    const steps = agentInstallPlanner.createPlan(params);
+    const steps = AgentInstallPlanner.createPlan(params);
     for (const step of steps) await this.deps.runCommand(step);
     return steps;
   }
@@ -40,7 +40,7 @@ async function runCommand(step: AgentInstallStep): Promise<void> {
   });
 }
 
-export const agentInstaller = new AgentInstallerClass({}, { runCommand });
+export const AgentInstaller = new AgentInstallerClass({}, { runCommand });
 
 export class AgentUpdaterClass extends DomainClass<{}, AgentUpdateDependencies> {
   public async update(params: { target: AgentInstallTarget }): Promise<AgentUpdateResult> {
@@ -54,7 +54,7 @@ export class AgentUpdaterClass extends DomainClass<{}, AgentUpdateDependencies> 
       .map((result) => result.target);
     const steps = installed
       .filter((result) => result.installed)
-      .flatMap((result) => agentUpdatePlanner.createPlan({ target: result.target }));
+      .flatMap((result) => AgentUpdatePlanner.createPlan({ target: result.target }));
     for (const step of steps) await this.deps.runCommand(step);
     return { steps, skippedTargets };
   }
@@ -98,4 +98,4 @@ async function readCommand(params: { command: string; args: string[] }): Promise
   });
 }
 
-export const agentUpdater = new AgentUpdaterClass({}, { runCommand, readCommand });
+export const AgentUpdater = new AgentUpdaterClass({}, { runCommand, readCommand });

@@ -44,6 +44,7 @@
     "release:major": "bun scripts/release.ts major"
   },
   "dependencies": {
+    "ink": "^7.1.0",
     "jsonc-parser": "^3.3.1",
     "react": "^19.2.7"
   },
@@ -64,6 +65,7 @@
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "ink-testing-library": "^4.0.0",
     "lucide-react": "^1.23.0",
     "motion": "^12.42.2",
     "react-dom": "^19.0.0",

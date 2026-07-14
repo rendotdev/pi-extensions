@@ -55,7 +55,7 @@ import remarkGfm from "remark-gfm";
 import type { DiffStyle, LgtmPreferences } from "../../domain/preferences/preferences.ts";
 import { ReviewHandoff } from "../../domain/review/review-handoff.ts";
 import { CommentDraft } from "./comment-draft.ts";
-import { preferencesApi } from "./preferences-api.ts";
+import { PreferencesApi } from "./preferences-api.ts";
 import { ToastNotifications } from "./toast-notifications.ts";
 import { ReviewWindowTitle } from "./window-title.ts";
 
@@ -330,11 +330,11 @@ function App() {
   const lastSavedSignature = useRef<string | null>(null);
   const preferencesQuery = useQuery({
     queryKey: ["preferences"],
-    queryFn: () => preferencesApi.get(),
+    queryFn: () => PreferencesApi.get(),
     staleTime: Number.POSITIVE_INFINITY,
   });
   const preferencesMutation = useMutation({
-    mutationFn: (preferences: LgtmPreferences) => preferencesApi.update({ preferences }),
+    mutationFn: (preferences: LgtmPreferences) => PreferencesApi.update({ preferences }),
     onMutate: async (preferences) => {
       await queryClient.cancelQueries({ queryKey: ["preferences"] });
       const previousPreferences = queryClient.getQueryData<LgtmPreferences>(["preferences"]);
@@ -388,19 +388,21 @@ function App() {
 
   const isLoaded = state !== null;
   useLayoutEffect(() => {
-    const header = reviewHeaderRef.current;
-    if (!header) return;
-    const updateHeaderHeight = () => {
+    const Header = reviewHeaderRef.current;
+    if (!Header) return;
+    function updateHeaderHeight() {
+      const CurrentHeader = reviewHeaderRef.current;
+      if (!CurrentHeader) return;
       document.documentElement.style.setProperty(
         "--review-header-height",
-        `${header.getBoundingClientRect().height}px`,
+        `${CurrentHeader.getBoundingClientRect().height}px`,
       );
-    };
-    const observer = new ResizeObserver(updateHeaderHeight);
-    observer.observe(header);
+    }
+    const Observer = new ResizeObserver(updateHeaderHeight);
+    Observer.observe(Header);
     updateHeaderHeight();
     return () => {
-      observer.disconnect();
+      Observer.disconnect();
       document.documentElement.style.removeProperty("--review-header-height");
     };
   }, [isLoaded]);
@@ -1135,7 +1137,7 @@ function DiffReviewList(props: {
 
   const handleFileExpandedChange = useCallback(
     (fileId: string, isExpanded: boolean) => {
-      const commitExpandedChange = () => {
+      function commitExpandedChange() {
         props.setFileExpanded(fileId, isExpanded);
         window.requestAnimationFrame(() => {
           const item = listRef.current?.querySelector<HTMLElement>(
@@ -1143,7 +1145,7 @@ function DiffReviewList(props: {
           );
           if (item) fileVirtualizer.measureElement(item);
         });
-      };
+      }
 
       if (!isExpanded) {
         const item = listRef.current?.querySelector<HTMLElement>(
@@ -1469,7 +1471,7 @@ function installTextSelectionCommentHook(
   if (textSelectionCleanupByNode.has(node)) return;
 
   const root = node.shadowRoot ?? node;
-  const handleMouseUp = () => {
+  function handleMouseUp() {
     window.setTimeout(() => {
       const selection = getSelectionFromRoot(root);
       const selectedText = selection?.toString() ?? "";
@@ -1496,7 +1498,7 @@ function installTextSelectionCommentHook(
       addTextSelectionComment(selectedRange, selectedText);
       selection.removeAllRanges();
     }, 0);
-  };
+  }
 
   root.addEventListener("mouseup", handleMouseUp);
   textSelectionCleanupByNode.set(node, () => root.removeEventListener("mouseup", handleMouseUp));

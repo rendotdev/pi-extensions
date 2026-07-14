@@ -59,7 +59,9 @@ function waitUntilAborted() {
   return vi.fn(
     async (_pointer: ReviewPointer, options: { signal?: AbortSignal }): Promise<CompletedReview> =>
       await new Promise<CompletedReview>((_resolve, reject) => {
-        const abort = () => reject(options.signal?.reason ?? new Error("Review aborted."));
+        function abort() {
+          reject(options.signal?.reason ?? new Error("Review aborted."));
+        }
         options.signal?.addEventListener("abort", abort, { once: true });
         if (options.signal?.aborted) abort();
       }),
