@@ -9,16 +9,28 @@ describe("LgtmPreferencesClass", () => {
       diffStyle: "unified",
       lineWrap: false,
       sidebarWidth: 256,
+      fileExpansion: "auto",
+      fileExpansionOverrides: {},
     });
   });
 
   it("accepts a split diff with line wrapping", () => {
     expect(
-      Preferences.parse({ value: { diffStyle: "split", lineWrap: true, sidebarWidth: 320 } }),
+      Preferences.parse({
+        value: {
+          diffStyle: "split",
+          lineWrap: true,
+          sidebarWidth: 320,
+          fileExpansion: "collapsed",
+          fileExpansionOverrides: { "src/example.ts": "expanded" },
+        },
+      }),
     ).toEqual({
       diffStyle: "split",
       lineWrap: true,
       sidebarWidth: 320,
+      fileExpansion: "collapsed",
+      fileExpansionOverrides: { "src/example.ts": "expanded" },
     });
   });
 
@@ -38,5 +50,17 @@ describe("LgtmPreferencesClass", () => {
     expect(() => Preferences.parse({ value: { lineWrap: "yes" } })).toThrow(
       "lineWrap must be a boolean.",
     );
+  });
+
+  it("rejects an unsupported file expansion preference", () => {
+    expect(() => Preferences.parse({ value: { fileExpansion: "manual" } })).toThrow(
+      'fileExpansion must be "auto", "expanded", or "collapsed".',
+    );
+  });
+
+  it("rejects unsupported per-file expansion overrides", () => {
+    expect(() =>
+      Preferences.parse({ value: { fileExpansionOverrides: { "src/example.ts": "auto" } } }),
+    ).toThrow('fileExpansionOverrides values must be "expanded" or "collapsed".');
   });
 });

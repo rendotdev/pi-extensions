@@ -138,9 +138,9 @@ export default defineConfig(async ({ command, mode }): Promise<ViteUserConfig> =
           output: ["dist/cli.mjs"],
         },
         "build:pi": {
-          command: "vp pack src/interfaces/pi/lgtm.ts --out-dir dist/pi",
+          command: "vp pack src/interfaces/pi/index.ts --out-dir extensions",
           cache: true,
-          output: ["dist/pi/lgtm.mjs"],
+          output: ["extensions/index.mjs"],
         },
         package: {
           command: 'node -e "" --',

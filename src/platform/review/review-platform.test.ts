@@ -122,6 +122,28 @@ describe("BuiltCliPathResolverClass", () => {
     expect(stat).toHaveBeenCalledWith("/project/dist/cli.mjs");
   });
 
+  it("uses the packaged CLI when running from the Pi extension entrypoint", async () => {
+    const stat = vi.fn(async () => undefined);
+    const Resolver = new BuiltCliPathResolverClass(
+      { modulePath: "/project/extensions/index.mjs" },
+      { stat },
+    );
+
+    await expect(Resolver.resolve()).resolves.toBe("/project/dist/cli.mjs");
+    expect(stat).toHaveBeenCalledWith("/project/dist/cli.mjs");
+  });
+
+  it("uses the packaged CLI when running from the legacy Pi extension entrypoint", async () => {
+    const stat = vi.fn(async () => undefined);
+    const Resolver = new BuiltCliPathResolverClass(
+      { modulePath: "/project/dist/pi/lgtm.mjs" },
+      { stat },
+    );
+
+    await expect(Resolver.resolve()).resolves.toBe("/project/dist/cli.mjs");
+    expect(stat).toHaveBeenCalledWith("/project/dist/cli.mjs");
+  });
+
   it("uses the current bundled CLI path", async () => {
     const stat = vi.fn(async () => undefined);
     const Resolver = new BuiltCliPathResolverClass(
@@ -243,7 +265,13 @@ describe("openReview", () => {
       const invalidPreferencesResponse = await fetch(new URL("/api/preferences", first.url), {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ diffStyle: "invalid", lineWrap: false, sidebarWidth: 256 }),
+        body: JSON.stringify({
+          diffStyle: "invalid",
+          lineWrap: false,
+          sidebarWidth: 256,
+          fileExpansion: "auto",
+          fileExpansionOverrides: {},
+        }),
       });
       expect(invalidPreferencesResponse.status).toBe(400);
       await expect(invalidPreferencesResponse.json()).resolves.toEqual(

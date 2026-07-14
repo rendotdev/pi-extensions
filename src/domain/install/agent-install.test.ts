@@ -47,6 +47,7 @@ describe("AgentInstallPlanner", () => {
         command: "codex",
         args: ["plugin", "marketplace", "upgrade", "rendotdev"],
       },
+      { target: "codex", command: "codex", args: ["plugin", "add", "lgtm@rendotdev"] },
     ]);
   });
 });

@@ -8,9 +8,18 @@ describe("PreferencesApiClass", () => {
         throw new TypeError("Illegal invocation");
       }
       return Promise.resolve(
-        new Response(JSON.stringify({ diffStyle: "unified", lineWrap: false, sidebarWidth: 256 }), {
-          status: 200,
-        }),
+        new Response(
+          JSON.stringify({
+            diffStyle: "unified",
+            lineWrap: false,
+            sidebarWidth: 256,
+            fileExpansion: "auto",
+            fileExpansionOverrides: {},
+          }),
+          {
+            status: 200,
+          },
+        ),
       );
     }) as unknown as typeof globalThis.fetch;
 
@@ -18,21 +27,34 @@ describe("PreferencesApiClass", () => {
       diffStyle: "unified",
       lineWrap: false,
       sidebarWidth: 256,
+      fileExpansion: "auto",
+      fileExpansionOverrides: {},
     });
   });
 
   it("loads preferences from the review API", async () => {
     const fetch = vi.fn(
       async () =>
-        new Response(JSON.stringify({ diffStyle: "split", lineWrap: true, sidebarWidth: 320 }), {
-          status: 200,
-        }),
+        new Response(
+          JSON.stringify({
+            diffStyle: "split",
+            lineWrap: true,
+            sidebarWidth: 320,
+            fileExpansion: "collapsed",
+            fileExpansionOverrides: { "src/example.ts": "expanded" },
+          }),
+          {
+            status: 200,
+          },
+        ),
     );
 
     await expect(new PreferencesApiClass({}, { fetch }).get()).resolves.toEqual({
       diffStyle: "split",
       lineWrap: true,
       sidebarWidth: 320,
+      fileExpansion: "collapsed",
+      fileExpansionOverrides: { "src/example.ts": "expanded" },
     });
     expect(fetch).toHaveBeenCalledWith("/api/preferences");
   });
@@ -40,20 +62,47 @@ describe("PreferencesApiClass", () => {
   it("updates preferences through a JSON mutation", async () => {
     const fetch = vi.fn(
       async () =>
-        new Response(JSON.stringify({ diffStyle: "unified", lineWrap: false, sidebarWidth: 288 }), {
-          status: 200,
-        }),
+        new Response(
+          JSON.stringify({
+            diffStyle: "unified",
+            lineWrap: false,
+            sidebarWidth: 288,
+            fileExpansion: "expanded",
+            fileExpansionOverrides: { "src/example.ts": "collapsed" },
+          }),
+          {
+            status: 200,
+          },
+        ),
     );
 
     await expect(
       new PreferencesApiClass({}, { fetch }).update({
-        preferences: { diffStyle: "unified", lineWrap: false, sidebarWidth: 288 },
+        preferences: {
+          diffStyle: "unified",
+          lineWrap: false,
+          sidebarWidth: 288,
+          fileExpansion: "expanded",
+          fileExpansionOverrides: { "src/example.ts": "collapsed" },
+        },
       }),
-    ).resolves.toEqual({ diffStyle: "unified", lineWrap: false, sidebarWidth: 288 });
+    ).resolves.toEqual({
+      diffStyle: "unified",
+      lineWrap: false,
+      sidebarWidth: 288,
+      fileExpansion: "expanded",
+      fileExpansionOverrides: { "src/example.ts": "collapsed" },
+    });
     expect(fetch).toHaveBeenCalledWith("/api/preferences", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ diffStyle: "unified", lineWrap: false, sidebarWidth: 288 }),
+      body: JSON.stringify({
+        diffStyle: "unified",
+        lineWrap: false,
+        sidebarWidth: 288,
+        fileExpansion: "expanded",
+        fileExpansionOverrides: { "src/example.ts": "collapsed" },
+      }),
     });
   });
 });

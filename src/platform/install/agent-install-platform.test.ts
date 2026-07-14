@@ -72,6 +72,11 @@ describe("AgentUpdaterClass", () => {
       command: "codex",
       args: ["plugin", "marketplace", "upgrade", "rendotdev"],
     });
+    expect(runCommand).toHaveBeenCalledWith({
+      target: "codex",
+      command: "codex",
+      args: ["plugin", "add", "lgtm@rendotdev"],
+    });
     expect(result).toEqual({
       steps: [
         {
@@ -79,6 +84,7 @@ describe("AgentUpdaterClass", () => {
           command: "codex",
           args: ["plugin", "marketplace", "upgrade", "rendotdev"],
         },
+        { target: "codex", command: "codex", args: ["plugin", "add", "lgtm@rendotdev"] },
       ],
       skippedTargets: [],
       integrations: [
@@ -90,8 +96,9 @@ describe("AgentUpdaterClass", () => {
               command: "codex",
               args: ["plugin", "marketplace", "upgrade", "rendotdev"],
             },
+            { target: "codex", command: "codex", args: ["plugin", "add", "lgtm@rendotdev"] },
           ],
-          outputs: ["Codex marketplace updated.\n"],
+          outputs: ["Codex marketplace updated.\n", "Codex marketplace updated.\n"],
         },
       ],
     });
@@ -105,9 +112,28 @@ describe("AgentUpdaterClass", () => {
           command: "codex",
           args: ["plugin", "marketplace", "upgrade", "rendotdev"],
         },
+        { target: "codex", command: "codex", args: ["plugin", "add", "lgtm@rendotdev"] },
       ],
-      outputs: ["Codex marketplace updated.\n"],
+      outputs: ["Codex marketplace updated.\n", "Codex marketplace updated.\n"],
     });
+  });
+
+  it("repairs a Codex marketplace-only installation", async () => {
+    const runCommand = vi.fn(async () => "done\n");
+    const readCommand = vi
+      .fn<(_: { command: string; args: string[] }) => Promise<string>>()
+      .mockResolvedValueOnce(JSON.stringify({ installed: [] }))
+      .mockResolvedValueOnce(JSON.stringify({ marketplaces: [{ name: "rendotdev" }] }));
+    const Updater = new AgentUpdaterClass({}, { runCommand, readCommand });
+
+    const result = await Updater.update({ target: "codex" });
+
+    expect(runCommand).toHaveBeenCalledWith({
+      target: "codex",
+      command: "codex",
+      args: ["plugin", "add", "lgtm@rendotdev"],
+    });
+    expect(result.skippedTargets).toEqual([]);
   });
 
   it("skips agent integrations that are not installed", async () => {

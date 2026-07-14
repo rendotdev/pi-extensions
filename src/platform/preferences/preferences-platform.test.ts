@@ -27,17 +27,25 @@ describe("LgtmPreferencesPlatformClass", () => {
       diffStyle: "unified",
       lineWrap: false,
       sidebarWidth: 256,
+      fileExpansion: "auto",
+      fileExpansionOverrides: {},
     });
   });
 
   it("writes the config under the repository .lgtm directory", async () => {
     const { platform } = await makePlatform();
     await platform.write({
-      preferences: { diffStyle: "split", lineWrap: true, sidebarWidth: 320 },
+      preferences: {
+        diffStyle: "split",
+        lineWrap: true,
+        sidebarWidth: 320,
+        fileExpansion: "collapsed",
+        fileExpansionOverrides: { "src/example.ts": "expanded" },
+      },
     });
 
     expect(await readFile(platform.path, "utf8")).toBe(
-      '{\n  "diffStyle": "split",\n  "lineWrap": true,\n  "sidebarWidth": 320\n}\n',
+      '{\n  "diffStyle": "split",\n  "lineWrap": true,\n  "sidebarWidth": 320,\n  "fileExpansion": "collapsed",\n  "fileExpansionOverrides": {\n    "src/example.ts": "expanded"\n  }\n}\n',
     );
   });
 
@@ -51,7 +59,13 @@ describe("LgtmPreferencesPlatformClass", () => {
     );
 
     await platform.write({
-      preferences: { diffStyle: "split", lineWrap: true, sidebarWidth: 320 },
+      preferences: {
+        diffStyle: "split",
+        lineWrap: true,
+        sidebarWidth: 320,
+        fileExpansion: "expanded",
+        fileExpansionOverrides: { "src/example.ts": "collapsed" },
+      },
     });
     const source = await readFile(platform.path, "utf8");
     expect(source).toContain("// Keep this note.");
@@ -59,6 +73,8 @@ describe("LgtmPreferencesPlatformClass", () => {
     expect(source).toContain('"diffStyle": "split"');
     expect(source).toContain('"lineWrap": true');
     expect(source).toContain('"sidebarWidth": 320');
+    expect(source).toContain('"fileExpansion": "expanded"');
+    expect(source).toContain('"src/example.ts": "collapsed"');
   });
 
   it("keeps the config valid when preference writes overlap", async () => {
@@ -71,6 +87,10 @@ describe("LgtmPreferencesPlatformClass", () => {
             diffStyle: index % 2 === 0 ? "split" : "unified",
             lineWrap: index % 3 === 0,
             sidebarWidth: 192 + (index % 19) * 16,
+            fileExpansion: index % 2 === 0 ? "collapsed" : "expanded",
+            fileExpansionOverrides: {
+              ["src/example-" + index + ".ts"]: index % 2 === 0 ? "expanded" : "collapsed",
+            },
           },
         });
       }),
@@ -80,6 +100,8 @@ describe("LgtmPreferencesPlatformClass", () => {
       diffStyle: expect.stringMatching(/^(split|unified)$/),
       lineWrap: expect.any(Boolean),
       sidebarWidth: expect.any(Number),
+      fileExpansion: expect.stringMatching(/^(collapsed|expanded)$/),
+      fileExpansionOverrides: expect.any(Object),
     });
   });
 });

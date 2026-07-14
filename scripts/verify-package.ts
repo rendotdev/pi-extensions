@@ -21,6 +21,7 @@ const allowedRoots = new Set([
   "assets",
   "bin",
   "dist",
+  "extensions",
   "package.json",
   "skills",
 ]);
@@ -36,7 +37,7 @@ const requiredPaths = [
   "package/.mcp.json",
   "package/bin/lgtm.mjs",
   "package/dist/cli.mjs",
-  "package/dist/pi/lgtm.mjs",
+  "package/extensions/index.mjs",
   "package/skills/lgtm/SKILL.md",
 ];
 
@@ -93,7 +94,10 @@ try {
   }
 
   const piExtension = packageJson.pi?.extensions?.[0];
-  if (!piExtension || !entrySet.has(`package/${piExtension}`)) {
+  if (piExtension !== "extensions/index.mjs") {
+    throw new Error('package.json pi.extensions must point to "extensions/index.mjs"');
+  }
+  if (!entrySet.has(`package/${piExtension}`)) {
     throw new Error("package.json pi.extensions must point to a packaged file");
   }
 

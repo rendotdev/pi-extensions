@@ -136,12 +136,37 @@ export class AgentUpdaterClass extends DomainClass<{}, AgentUpdateDependencies> 
           await this.deps.readCommand({ command: "claude", args: ["plugin", "list"] })
         ).includes("lgtm@rendotdev");
       }
+      return (
+        (await this.tryIsCodexPluginInstalled()) || (await this.tryIsCodexMarketplaceConfigured())
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  private async tryIsCodexPluginInstalled(): Promise<boolean> {
+    try {
       const output = await this.deps.readCommand({
         command: "codex",
         args: ["plugin", "list", "--json"],
       });
       const plugins = JSON.parse(output) as { installed?: { pluginId?: unknown }[] };
       return plugins.installed?.some((plugin) => plugin.pluginId === "lgtm@rendotdev") ?? false;
+    } catch {
+      return false;
+    }
+  }
+
+  private async tryIsCodexMarketplaceConfigured(): Promise<boolean> {
+    try {
+      const output = await this.deps.readCommand({
+        command: "codex",
+        args: ["plugin", "marketplace", "list", "--json"],
+      });
+      const marketplaces = JSON.parse(output) as { marketplaces?: { name?: unknown }[] };
+      return (
+        marketplaces.marketplaces?.some((marketplace) => marketplace.name === "rendotdev") ?? false
+      );
     } catch {
       return false;
     }

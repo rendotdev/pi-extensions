@@ -33,11 +33,11 @@ const updates: Array<{ path: string; update: (json: JsonObject) => void }> = [
   },
   {
     path: ".claude-plugin/marketplace.json",
-    update: (json) => updateMarketplace(json, packageName, packageVersion, true),
+    update: (json) => updateNpmMarketplace(json, packageName, packageVersion, true),
   },
   {
     path: ".agents/plugins/marketplace.json",
-    update: (json) => updateMarketplace(json, packageName, packageVersion, false),
+    update: (json) => updateLocalMarketplace(json),
   },
 ];
 
@@ -69,12 +69,30 @@ if (changed.length === 0) {
   console.log(`Updated ${changed.join(", ")} to ${packageName}@${packageVersion}.`);
 }
 
-function updateMarketplace(
+function updateNpmMarketplace(
   json: JsonObject,
   expectedPackage: string,
   expectedVersion: string,
   includeEntryVersion: boolean,
 ) {
+  const plugin = findLgtmMarketplacePlugin(json);
+  if (!isJsonObject(plugin.source) || plugin.source.source !== "npm") {
+    throw new Error("LGTM marketplace source must use npm.");
+  }
+  plugin.source.package = expectedPackage;
+  plugin.source.version = expectedVersion;
+  if (includeEntryVersion) {
+    plugin.version = expectedVersion;
+  }
+}
+
+function updateLocalMarketplace(json: JsonObject) {
+  const plugin = findLgtmMarketplacePlugin(json);
+  plugin.source = { source: "local", path: "." };
+  delete plugin.version;
+}
+
+function findLgtmMarketplacePlugin(json: JsonObject): JsonObject {
   if (!Array.isArray(json.plugins)) {
     throw new Error("Marketplace must define a plugins array.");
   }
@@ -84,14 +102,7 @@ function updateMarketplace(
   if (!plugin) {
     throw new Error("Marketplace must define the lgtm plugin.");
   }
-  if (!isJsonObject(plugin.source) || plugin.source.source !== "npm") {
-    throw new Error("LGTM marketplace source must use npm.");
-  }
-  plugin.source.package = expectedPackage;
-  plugin.source.version = expectedVersion;
-  if (includeEntryVersion) {
-    plugin.version = expectedVersion;
-  }
+  return plugin;
 }
 
 function isJsonObject(value: unknown): value is JsonObject {

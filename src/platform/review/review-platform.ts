@@ -135,16 +135,31 @@ export class BuiltCliPathResolverClass extends DomainClass<
 > {
   public async resolve(): Promise<string> {
     const sourceReviewPlatformPath = `${sep}src${sep}platform${sep}review${sep}review-platform.ts`;
-    if (!this.params.modulePath.endsWith(sourceReviewPlatformPath)) {
-      return this.params.modulePath;
+    if (this.params.modulePath.endsWith(sourceReviewPlatformPath)) {
+      return this.resolveExistingCliPath(
+        resolve(this.params.modulePath, "..", "..", "..", "..", "dist", "cli.mjs"),
+      );
     }
 
-    const cliPath = resolve(this.params.modulePath, "..", "..", "..", "..", "dist", "cli.mjs");
+    if (this.params.modulePath.endsWith(`${sep}extensions${sep}index.mjs`)) {
+      return this.resolveExistingCliPath(
+        resolve(this.params.modulePath, "..", "..", "dist", "cli.mjs"),
+      );
+    }
+
+    if (this.params.modulePath.includes(`${sep}dist${sep}pi${sep}`)) {
+      return this.resolveExistingCliPath(resolve(this.params.modulePath, "..", "..", "cli.mjs"));
+    }
+
+    return this.params.modulePath;
+  }
+
+  private async resolveExistingCliPath(cliPath: string): Promise<string> {
     try {
       await this.deps.stat(cliPath);
       return cliPath;
     } catch {
-      throw new Error("LGTM is not built. Run `vp check` and `vp run package` first.");
+      throw new Error("LGTM CLI is not built. Run `vp check` and `vp run package` first.");
     }
   }
 }

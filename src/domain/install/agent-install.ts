@@ -67,7 +67,10 @@ export class AgentUpdatePlannerClass extends DomainClass<{}, {}> {
       ];
     }
 
-    return [{ target, command: "codex", args: ["plugin", "marketplace", "upgrade", "rendotdev"] }];
+    return [
+      { target, command: "codex", args: ["plugin", "marketplace", "upgrade", "rendotdev"] },
+      { target, command: "codex", args: ["plugin", "add", "lgtm@rendotdev"] },
+    ];
   }
 }
 

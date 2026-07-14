@@ -36,9 +36,21 @@ export class LgtmPreferencesPlatformClass extends DomainClass<{ cwd: string }, {
       diffStyleSource,
       modify(diffStyleSource, ["lineWrap"], preferences.lineWrap, { formattingOptions }),
     );
-    const updatedSource = applyEdits(
+    const sidebarWidthSource = applyEdits(
       lineWrapSource,
       modify(lineWrapSource, ["sidebarWidth"], preferences.sidebarWidth, {
+        formattingOptions,
+      }),
+    );
+    const fileExpansionSource = applyEdits(
+      sidebarWidthSource,
+      modify(sidebarWidthSource, ["fileExpansion"], preferences.fileExpansion, {
+        formattingOptions,
+      }),
+    );
+    const updatedSource = applyEdits(
+      fileExpansionSource,
+      modify(fileExpansionSource, ["fileExpansionOverrides"], preferences.fileExpansionOverrides, {
         formattingOptions,
       }),
     );

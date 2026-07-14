@@ -27,7 +27,9 @@
     ".mcp.claude.json",
     ".mcp.json",
     "bin",
-    "dist",
+    "dist/cli.mjs",
+    "dist/web",
+    "extensions",
     "skills",
     "LICENSE",
     "README.md"
@@ -97,7 +99,7 @@
   "packageManager": "npm@11.12.1",
   "pi": {
     "extensions": [
-      "dist/pi/lgtm.mjs"
+      "extensions/index.mjs"
     ],
     "skills": [
       "skills"

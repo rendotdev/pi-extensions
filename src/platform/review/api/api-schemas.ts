@@ -107,6 +107,8 @@ export const preferencesSchema = z.object({
   diffStyle: z.enum(["unified", "split"]),
   lineWrap: z.boolean(),
   sidebarWidth: z.int().check(z.minimum(192), z.maximum(480)),
+  fileExpansion: z.enum(["auto", "expanded", "collapsed"]),
+  fileExpansionOverrides: z.record(z.string(), z.enum(["expanded", "collapsed"])),
 });
 export const finishRequestSchema = z.object({
   decision: z.enum(["approved", "changes_requested"]),

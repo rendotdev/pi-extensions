@@ -39,6 +39,7 @@ import {
 import { useForm } from "@tanstack/react-form";
 import { formatForDisplay, useHotkey } from "@tanstack/react-hotkeys";
 import { useAsyncDebouncer } from "@tanstack/react-pacer/async-debouncer";
+import { useDebouncer } from "@tanstack/react-pacer/debouncer";
 import {
   QueryClient,
   QueryClientProvider,
@@ -58,7 +59,12 @@ import {
 import DiffsWorker from "@pierre/diffs/worker/worker.js?worker";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { LgtmPreferences, type DiffStyle } from "../../domain/preferences/preferences.ts";
+import {
+  LgtmPreferences,
+  type DiffStyle,
+  type FileExpansion,
+  type FileExpansionOverride,
+} from "../../domain/preferences/preferences.ts";
 import { ReviewHandoff } from "../../domain/review/review-handoff.ts";
 import { CommentDraft } from "./comment-draft.ts";
 import { PreferencesApi } from "./preferences-api.ts";
@@ -304,9 +310,35 @@ function updateReviewFile(
   };
 }
 
-function getDefaultCollapsedFileIds(state: AppState) {
+function getInitialCollapsedFileIds(
+  state: AppState,
+  fileExpansion: FileExpansion,
+  fileExpansionOverrides: Record<string, FileExpansionOverride>,
+) {
   if (state.payload.kind !== "diff") {
     return new Set<string>();
+  }
+
+  const collapsedFileIds = getBaseCollapsedFileIds(state, fileExpansion);
+  for (const file of state.payload.files) {
+    const override = fileExpansionOverrides[file.location];
+    if (override === "collapsed") {
+      collapsedFileIds.add(file.id);
+    }
+    if (override === "expanded") {
+      collapsedFileIds.delete(file.id);
+    }
+  }
+  return collapsedFileIds;
+}
+
+function getBaseCollapsedFileIds(state: AppState, fileExpansion: FileExpansion) {
+  if (fileExpansion === "expanded") {
+    return new Set<string>();
+  }
+
+  if (fileExpansion === "collapsed") {
+    return new Set(state.payload.files.map((file) => file.id));
   }
 
   const reviewFileByLocation = new Map(state.review.files.map((file) => [file.location, file]));
@@ -330,10 +362,13 @@ function App() {
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [copiedReviewPath, setCopiedReviewPath] = useState(false);
   const [isFinishing, setIsFinishing] = useState(false);
+  const [showBusyIndicator, setShowBusyIndicator] = useState(false);
+  const [busyIndicatorLabel, setBusyIndicatorLabel] = useState("Saving review");
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [recoveryStatus, setRecoveryStatus] = useState<string | null>(null);
   const [collapsedFileIds, setCollapsedFileIds] = useState<Set<string>>(() => new Set());
   const reviewHeaderRef = useRef<HTMLElement | null>(null);
+  const initializedReviewId = useRef<string | null>(null);
   const lastSavedSignature = useRef<string | null>(null);
   const latestReviewRef = useRef<ReviewJson | null>(null);
   latestReviewRef.current = state?.review ?? null;
@@ -372,6 +407,9 @@ function App() {
   const preferences = preferencesQuery.data ?? LgtmPreferences.defaults;
   const diffStyle = preferences.diffStyle;
   const lineWrap = preferences.lineWrap;
+  const fileExpansion = preferences.fileExpansion;
+  const fileExpansionOverrides = preferences.fileExpansionOverrides;
+  const preferencesReady = preferencesQuery.isFetched;
   const diffThemeType = resolvedTheme === "dark" ? "dark" : "light";
   const diffTheme = diffThemeType === "dark" ? "github-dark" : "github-light";
 
@@ -383,18 +421,24 @@ function App() {
   }, [preferencesQuery.error]);
 
   useEffect(() => {
-    if (!reviewStateQuery.data) {
+    if (!reviewStateQuery.data || !preferencesReady) {
       return;
     }
     const nextState = reviewStateQuery.data;
+    if (initializedReviewId.current === nextState.review.reviewId) {
+      return;
+    }
+    initializedReviewId.current = nextState.review.reviewId;
     lastSavedSignature.current = meaningfulReviewSignature(nextState.review);
     document.title = ReviewWindowTitle.format({
       cwd: nextState.payload.cwd,
       name: nextState.payload.name,
     });
-    setCollapsedFileIds(getDefaultCollapsedFileIds(nextState));
+    setCollapsedFileIds(
+      getInitialCollapsedFileIds(nextState, fileExpansion, fileExpansionOverrides),
+    );
     setState(nextState);
-  }, [reviewStateQuery.data]);
+  }, [fileExpansion, fileExpansionOverrides, preferencesReady, reviewStateQuery.data]);
 
   useEffect(() => {
     if (!reviewStateQuery.error) {
@@ -448,9 +492,52 @@ function App() {
         ToastNotifications.commentsNotSaved();
       },
     },
-    (saveState) => ({ isExecuting: saveState.isExecuting }),
+    (saveState) => ({ isExecuting: saveState.isExecuting, isPending: saveState.isPending }),
   );
-  const isSaving = saveDebouncer.state.isExecuting || reviewSaveMutation.isPending;
+  const isSaving =
+    saveDebouncer.state.isPending ||
+    saveDebouncer.state.isExecuting ||
+    reviewSaveMutation.isPending;
+  const isPreferenceSaving = preferencesMutation.isPending;
+  const isBusy = isFinishing || isSaving || isPreferenceSaving;
+  const hideBusyIndicatorDebouncer = useDebouncer(
+    () => {
+      setShowBusyIndicator(false);
+    },
+    { wait: 650 },
+  );
+
+  useEffect(() => {
+    if (isBusy) {
+      hideBusyIndicatorDebouncer.cancel();
+      setBusyIndicatorLabel(
+        isFinishing
+          ? "Finishing review"
+          : isPreferenceSaving && !isSaving
+            ? "Saving preferences"
+            : "Saving review",
+      );
+      setShowBusyIndicator(true);
+      return;
+    }
+
+    if (showBusyIndicator) {
+      hideBusyIndicatorDebouncer.maybeExecute();
+    }
+  }, [
+    hideBusyIndicatorDebouncer,
+    isBusy,
+    isFinishing,
+    isPreferenceSaving,
+    isSaving,
+    showBusyIndicator,
+  ]);
+
+  const showSavingPreferences = useCallback(() => {
+    hideBusyIndicatorDebouncer.cancel();
+    setBusyIndicatorLabel("Saving preferences");
+    setShowBusyIndicator(true);
+  }, [hideBusyIndicatorDebouncer]);
 
   const queueSave = useCallback(
     (review: ReviewJson) => {
@@ -479,17 +566,36 @@ function App() {
     [queueSave],
   );
 
-  const setFileExpanded = useCallback((fileId: string, isExpanded: boolean) => {
-    setCollapsedFileIds((current) => {
-      const next = new Set(current);
-      if (isExpanded) {
-        next.delete(fileId);
-      } else {
-        next.add(fileId);
+  const setFileExpanded = useCallback(
+    (fileId: string, isExpanded: boolean) => {
+      setCollapsedFileIds((current) => {
+        const next = new Set(current);
+        if (isExpanded) {
+          next.delete(fileId);
+        } else {
+          next.add(fileId);
+        }
+        return next;
+      });
+
+      if (state?.payload.kind !== "diff") {
+        return;
       }
-      return next;
-    });
-  }, []);
+      const file = state.payload.files.find((file) => file.id === fileId);
+      if (!file) {
+        return;
+      }
+      showSavingPreferences();
+      preferencesMutation.mutate({
+        ...preferences,
+        fileExpansionOverrides: {
+          ...preferences.fileExpansionOverrides,
+          [file.location]: isExpanded ? "expanded" : "collapsed",
+        },
+      });
+    },
+    [preferences, preferencesMutation, showSavingPreferences, state],
+  );
 
   const addComment = useCallback(
     (file: ReviewSourceFile, selectedRange: SelectedLineRange, selectedTextOverride?: string) => {
@@ -745,30 +851,39 @@ function App() {
   const reviewFileName = reviewPathParts.at(-1) ?? "review.json";
   const reviewSessionName = reviewPathParts.at(-2) ?? "session";
   const displayedReviewPath =
-    reviewSessionName.length > 24
-      ? `${reviewSessionName.slice(0, 14)}…${reviewSessionName.slice(-7)}/${reviewFileName}`
+    reviewSessionName.length > 40
+      ? `${reviewSessionName.slice(0, 24)}…${reviewSessionName.slice(-12)}/${reviewFileName}`
       : `${reviewSessionName}/${reviewFileName}`;
 
   function toggleAllFiles() {
     if (!canToggleFiles) {
       return;
     }
+    const nextFileExpansion = hasExpandedFiles ? "collapsed" : "expanded";
     setCollapsedFileIds(
-      hasExpandedFiles ? new Set(payload.files.map((file) => file.id)) : new Set(),
+      nextFileExpansion === "collapsed" ? new Set(payload.files.map((file) => file.id)) : new Set(),
     );
+    showSavingPreferences();
+    preferencesMutation.mutate({
+      ...preferences,
+      fileExpansion: nextFileExpansion,
+      fileExpansionOverrides: {},
+    });
   }
 
   function updateDiffStyle(nextDiffStyle: DiffStyle) {
-    if (nextDiffStyle === diffStyle || preferencesMutation.isPending) {
+    if (nextDiffStyle === diffStyle) {
       return;
     }
+    showSavingPreferences();
     preferencesMutation.mutate({ ...preferences, diffStyle: nextDiffStyle });
   }
 
   function updateLineWrap(isSelected: boolean) {
-    if (isSelected === lineWrap || preferencesMutation.isPending) {
+    if (isSelected === lineWrap) {
       return;
     }
+    showSavingPreferences();
     preferencesMutation.mutate({ ...preferences, lineWrap: isSelected });
   }
 
@@ -776,6 +891,7 @@ function App() {
     if (nextSidebarWidth === preferences.sidebarWidth) {
       return;
     }
+    showSavingPreferences();
     preferencesMutation.mutate({ ...preferences, sidebarWidth: nextSidebarWidth });
   }
 
@@ -802,7 +918,7 @@ function App() {
                 <InputGroup
                   variant="secondary"
                   aria-label="Review JSON path"
-                  className="group/review-path relative w-64 max-w-[45vw] shrink-0 !bg-transparent shadow-none"
+                  className="group/review-path relative w-[36rem] max-w-[60vw] shrink-0 !bg-transparent shadow-none"
                 >
                   <InputGroup.Input
                     readOnly
@@ -843,12 +959,7 @@ function App() {
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   {payload.kind === "diff" ? (
                     <>
-                      <ButtonGroup
-                        size="sm"
-                        variant="outline"
-                        isDisabled={preferencesMutation.isPending}
-                        aria-label="Diff layout"
-                      >
+                      <ButtonGroup size="sm" variant="outline" aria-label="Diff layout">
                         <Button
                           className={diffStyle === "unified" ? "bg-default" : undefined}
                           aria-pressed={diffStyle === "unified"}
@@ -878,7 +989,6 @@ function App() {
                         size="sm"
                         variant="ghost"
                         isSelected={lineWrap}
-                        isDisabled={preferencesMutation.isPending}
                         onChange={updateLineWrap}
                       >
                         <WrapText
@@ -895,20 +1005,16 @@ function App() {
                   <div className="flex min-w-0 items-center justify-end gap-2" aria-live="polite">
                     <span className="relative h-4 w-4 shrink-0">
                       <AnimatePresence initial={false}>
-                        {isFinishing || isSaving ? (
+                        {showBusyIndicator ? (
                           <motion.span
                             key="loading"
-                            className="absolute inset-0 flex items-center justify-center text-muted"
+                            className="absolute inset-0 flex items-center justify-center text-accent"
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={{ opacity: 0 }}
                             transition={snappyTransition}
                           >
-                            <Spinner
-                              size="sm"
-                              color="current"
-                              aria-label={isFinishing ? "Finishing review" : "Saving review"}
-                            />
+                            <Spinner size="sm" color="current" aria-label={busyIndicatorLabel} />
                           </motion.span>
                         ) : reviewStatusLabel ? (
                           <motion.span
