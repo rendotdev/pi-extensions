@@ -47,6 +47,7 @@ run("git", [
   ".claude-plugin/marketplace.json",
   ".claude-plugin/plugin.json",
   ".codex-plugin/plugin.json",
+  ".mcp.json",
 ]);
 run("git", ["commit", "-m", `Release ${tag}`]);
 run("git", ["tag", "--annotate", tag, "--message", tag]);
