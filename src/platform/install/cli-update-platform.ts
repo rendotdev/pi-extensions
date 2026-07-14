@@ -9,13 +9,31 @@ export type CliUpdateStep = {
   args: string[];
 };
 
+export type CliUpdatePlan =
+  | {
+      status: "ready";
+      currentVersion: string;
+      latestVersion: string;
+      step: CliUpdateStep;
+    }
+  | { status: "current"; version: string }
+  | { status: "skipped"; reason: string };
+
 export type CliUpdateResult =
-  | { status: "updated"; step: CliUpdateStep }
+  | {
+      status: "updated";
+      previousVersion: string;
+      version: string;
+      step: CliUpdateStep;
+      output: string;
+    }
+  | { status: "current"; version: string }
   | { status: "skipped"; reason: string };
 
 type CliUpdaterDependencies = {
   executableExists: (path: string) => boolean;
-  runCommand: (step: CliUpdateStep) => Promise<void>;
+  readCommand: (step: CliUpdateStep) => Promise<string>;
+  runCommand: (step: CliUpdateStep) => Promise<string>;
 };
 
 type CliUpdateCommandRunnerDependencies = {
@@ -27,13 +45,25 @@ type PackageRootFinderDependencies = {
   readFileSync: typeof readFileSync;
 };
 
+type PackageVersionReaderDependencies = {
+  readFileSync: typeof readFileSync;
+};
+
 export class CliUpdateCommandRunnerClass extends DomainClass<
   {},
   CliUpdateCommandRunnerDependencies
 > {
-  public async run(params: CliUpdateStep): Promise<void> {
+  public async run(params: CliUpdateStep): Promise<string> {
+    return await this.execute(params);
+  }
+
+  public async read(params: CliUpdateStep): Promise<string> {
+    return await this.execute(params);
+  }
+
+  private async execute(params: CliUpdateStep): Promise<string> {
     const { spawn: spawnCommand } = this.deps;
-    await new Promise<void>(function runCommand(resolvePromise, reject) {
+    return await new Promise<string>(function runCommand(resolvePromise, reject) {
       const child = spawnCommand(params.command, params.args, {
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -47,7 +77,7 @@ export class CliUpdateCommandRunnerClass extends DomainClass<
       child.once("error", reject);
       child.once("exit", function handleExit(code, signal) {
         if (code === 0) {
-          resolvePromise();
+          resolvePromise(Buffer.concat(output).toString("utf8"));
           return;
         }
         const detail = Buffer.concat(output).toString("utf8").trim();
@@ -61,27 +91,30 @@ export class CliUpdateCommandRunnerClass extends DomainClass<
   }
 }
 
-export class CliUpdaterClass extends DomainClass<{ packageRoot: string }, CliUpdaterDependencies> {
-  private readonly packageRoot: string;
-
-  public constructor(params: { packageRoot: string }, deps: CliUpdaterDependencies) {
-    super(params, deps);
-    this.packageRoot = resolve(params.packageRoot);
+export class CliUpdaterClass extends DomainClass<
+  { packageRoot: string; currentVersion: string },
+  CliUpdaterDependencies
+> {
+  public constructor(
+    params: { packageRoot: string; currentVersion: string },
+    deps: CliUpdaterDependencies,
+  ) {
+    super({ ...params, packageRoot: resolve(params.packageRoot) }, deps);
   }
 
-  public plan(): CliUpdateResult {
-    const scopeDirectory = dirname(this.packageRoot);
+  public async plan(): Promise<CliUpdatePlan> {
+    const scopeDirectory = dirname(this.params.packageRoot);
     const nodeModulesDirectory = dirname(scopeDirectory);
     const libDirectory = dirname(nodeModulesDirectory);
     if (
-      basename(this.packageRoot) !== "lgtm" ||
+      basename(this.params.packageRoot) !== "lgtm" ||
       basename(scopeDirectory) !== "@rendotdev" ||
       basename(nodeModulesDirectory) !== "node_modules" ||
       basename(libDirectory) !== "lib"
     ) {
       return {
         status: "skipped",
-        reason: "LGTM is not running from a global npm installation.",
+        reason: "lgtm is not running from a global npm installation.",
       };
     }
 
@@ -94,21 +127,57 @@ export class CliUpdaterClass extends DomainClass<{ packageRoot: string }, CliUpd
       };
     }
 
+    const latestVersion = this.parseLatestVersion(
+      await this.deps.readCommand({
+        command: npm,
+        args: ["view", "@rendotdev/lgtm@latest", "version", "--json"],
+      }),
+    );
+    if (latestVersion === this.params.currentVersion) {
+      return { status: "current", version: this.params.currentVersion };
+    }
+
     return {
-      status: "updated",
+      status: "ready",
+      currentVersion: this.params.currentVersion,
+      latestVersion,
       step: {
         command: npm,
-        args: ["install", "--global", "--prefix", prefix, "@rendotdev/lgtm@latest"],
+        args: ["install", "--global", "--prefix", prefix, `@rendotdev/lgtm@${latestVersion}`],
       },
     };
   }
 
-  public async update(): Promise<CliUpdateResult> {
-    const result = this.plan();
-    if (result.status === "updated") {
-      await this.deps.runCommand(result.step);
+  public getCurrentVersion(): string {
+    return this.params.currentVersion;
+  }
+
+  public async update(params: { plan?: CliUpdatePlan }): Promise<CliUpdateResult> {
+    const plan = params.plan ?? (await this.plan());
+    if (plan.status !== "ready") {
+      return plan;
     }
-    return result;
+    const output = await this.deps.runCommand(plan.step);
+    return {
+      status: "updated",
+      previousVersion: plan.currentVersion,
+      version: plan.latestVersion,
+      step: plan.step,
+      output,
+    };
+  }
+
+  private parseLatestVersion(output: string): string {
+    let value: unknown;
+    try {
+      value = JSON.parse(output);
+    } catch {
+      throw new Error("npm returned an invalid latest lgtm version.");
+    }
+    if (typeof value !== "string" || value.trim().length === 0) {
+      throw new Error("npm returned an invalid latest lgtm version.");
+    }
+    return value;
   }
 }
 
@@ -128,17 +197,34 @@ export class PackageRootFinderClass extends DomainClass<{}, PackageRootFinderDep
       }
       directory = dirname(directory);
     }
-    throw new Error("Could not locate the LGTM package root.");
+    throw new Error("Could not locate the lgtm package root.");
+  }
+}
+
+export class PackageVersionReaderClass extends DomainClass<{}, PackageVersionReaderDependencies> {
+  public read(params: { packageRoot: string }): string {
+    const manifest = JSON.parse(
+      this.deps.readFileSync(join(params.packageRoot, "package.json"), "utf8"),
+    ) as { version?: unknown };
+    if (typeof manifest.version !== "string" || manifest.version.trim().length === 0) {
+      throw new Error("The lgtm package does not declare a valid version.");
+    }
+    return manifest.version;
   }
 }
 
 const CliUpdateCommandRunner = new CliUpdateCommandRunnerClass({}, { spawn });
 const PackageRootFinder = new PackageRootFinderClass({}, { existsSync, readFileSync });
+const PackageVersionReader = new PackageVersionReaderClass({}, { readFileSync });
+const packageRoot = PackageRootFinder.find({ moduleUrl: import.meta.url });
 
 export const CliUpdater = new CliUpdaterClass(
-  { packageRoot: PackageRootFinder.find({ moduleUrl: import.meta.url }) },
+  { packageRoot, currentVersion: PackageVersionReader.read({ packageRoot }) },
   {
     executableExists: existsSync,
+    readCommand: function readCommand(step) {
+      return CliUpdateCommandRunner.read(step);
+    },
     runCommand: function runCommand(step) {
       return CliUpdateCommandRunner.run(step);
     },

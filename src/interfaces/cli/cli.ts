@@ -16,14 +16,12 @@ import {
   AgentInstallPlanner,
   AgentUpdatePlanner,
   isAgentInstallTarget,
-  type AgentInstallStep,
-  type AgentInstallTarget,
 } from "../../domain/install/agent-install.ts";
 import { AgentInstaller, AgentUpdater } from "../../platform/install/agent-install-platform.ts";
-import { CliUpdater, type CliUpdateResult } from "../../platform/install/cli-update-platform.ts";
+import { CliUpdater } from "../../platform/install/cli-update-platform.ts";
 import { runMcpServer } from "../mcp/mcp.ts";
 import { JsonReviewInputParser } from "./json-review-input.ts";
-import { CommandUiRenderer } from "./command-ui.tsx";
+import { CommandUiRenderer, type CommandUiReporter } from "./command-ui.tsx";
 
 const args = process.argv.slice(2);
 if (args[0] === "--") {
@@ -95,7 +93,7 @@ function reviewOptions(report: (label: string) => void) {
 function formatPointer(pointer: ReviewPointer) {
   return CommandUiRenderer.formatDetail({
     lines: [
-      `LGTM review opened: ${pointer.name}`,
+      `lgtm review opened: ${pointer.name}`,
       `URL: ${pointer.url}`,
       `Review JSON: ${pointer.reviewPath}`,
     ],
@@ -115,7 +113,7 @@ async function readInput(path: string | undefined) {
 }
 
 function helpText() {
-  return `LGTM, human approval for agent work
+  return `lgtm, human approval for agent work
 
 Usage:
   lgtm review [git] --name <name> [--since-last] [--cwd <path>] [--json]
@@ -135,78 +133,17 @@ JSON review schema:
     ]
   }
 
-Run \`lgtm review --name "Review current changes"\` to review current Git changes. Add \`--since-last\` to show only changes made after the most recent compatible LGTM diff review with an approved or changes-requested outcome. Document Markdown and review JSON are read from stdin when no file is supplied. Review outcomes are \`approved\`, \`changes_requested\`, or \`canceled\`.`;
-}
-
-function formatIntegrationResult(params: {
-  action: "setup" | "update";
-  target: AgentInstallTarget;
-  steps: AgentInstallStep[];
-  skippedTargets?: Exclude<AgentInstallTarget, "all">[];
-  cli?: CliUpdateResult;
-  dryRun?: boolean;
-}) {
-  const lines: string[] = [];
-  if (params.action === "setup") {
-    lines.push(
-      params.dryRun
-        ? `Would set up LGTM integrations for ${params.target}.`
-        : `Set up LGTM integrations for ${params.target}. Start a new agent session to load the plugin and skill.`,
-    );
-    return CommandUiRenderer.formatChecklist({ lines });
-  }
-
-  if (params.cli?.status === "updated") {
-    lines.push(`  CLI: ${params.dryRun ? "would update" : "updated"}`);
-  }
-  if (params.cli?.status === "skipped") {
-    lines.push(`  CLI: skipped; ${params.cli.reason}`);
-  }
-
-  const updatedTargets = [
-    ...new Set(
-      params.steps.map(function selectTarget(step) {
-        return step.target;
-      }),
-    ),
-  ];
-  const integrationNames: Record<Exclude<AgentInstallTarget, "all">, string> = {
-    pi: "Pi",
-    claude: "Claude Code",
-    codex: "Codex",
-  };
-  const ListFormatter = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
-  if (updatedTargets.length > 0) {
-    const targets = ListFormatter.format(
-      updatedTargets.map(function selectName(target) {
-        return integrationNames[target];
-      }),
-    );
-    lines.push(`  Integrations: ${params.dryRun ? "would update" : "updated"} (${targets})`);
-    if (!params.dryRun) {
-      lines.push("  Restart your agent session to load the updated plugin and skill.");
-    }
-  }
-  if (params.skippedTargets?.length) {
-    const targets = ListFormatter.format(
-      params.skippedTargets.map(function selectName(target) {
-        return integrationNames[target];
-      }),
-    );
-    const verb = params.skippedTargets.length > 1 ? "are" : "is";
-    lines.push(`  Integrations: skipped (${targets} ${verb} not installed)`);
-  }
-  return CommandUiRenderer.formatDetail({ lines });
+Run \`lgtm review --name "Review current changes"\` to review current Git changes. Add \`--since-last\` to show only changes made after the most recent compatible lgtm diff review with an approved or changes-requested outcome. Document Markdown and review JSON are read from stdin when no file is supplied. Review outcomes are \`approved\`, \`changes_requested\`, or \`canceled\`.`;
 }
 
 async function runCommand<Result>(params: {
   label: string;
   successLabel?: string;
-  execute: (report: (label: string) => void) => Promise<Result>;
+  execute: (report: CommandUiReporter) => Promise<Result>;
   renderSuccess: (result: Result) => string;
 }): Promise<Result> {
   if (jsonOutput) {
-    const result = await params.execute(() => undefined);
+    const result = await params.execute(CommandUiRenderer.createSilentReporter());
     console.log(JSON.stringify(result, null, 2));
     return result;
   }
@@ -241,20 +178,24 @@ async function main() {
     const plan = AgentInstallPlanner.createPlan({ target });
     if (takeFlag("--dry-run")) {
       await runCommand({
-        label: "Planning LGTM setup",
+        label: "Planning lgtm setup",
         execute: async () => ({ action: "setup" as const, target, steps: plan, dryRun: true }),
-        renderSuccess: formatIntegrationResult,
+        renderSuccess: function renderSuccess(result) {
+          return CommandUiRenderer.formatIntegrationResult(result);
+        },
       });
       return;
     }
     await runCommand({
-      label: "Setting up LGTM integrations",
+      label: "Setting up lgtm integrations",
       execute: async () => ({
         action: "setup" as const,
         target,
         steps: await AgentInstaller.install({ target }),
       }),
-      renderSuccess: formatIntegrationResult,
+      renderSuccess: function renderSuccess(result) {
+        return CommandUiRenderer.formatIntegrationResult(result);
+      },
     });
     return;
   }
@@ -267,28 +208,69 @@ async function main() {
     const plan = AgentUpdatePlanner.createPlan({ target });
     if (takeFlag("--dry-run")) {
       await runCommand({
-        label: "Planning LGTM update",
+        label: "Planning lgtm update",
         execute: async () => ({
           action: "update" as const,
           target,
           steps: plan,
-          cli: CliUpdater.plan(),
+          cli: await CliUpdater.plan(),
           dryRun: true,
         }),
-        renderSuccess: formatIntegrationResult,
+        renderSuccess: function renderSuccess(result) {
+          return CommandUiRenderer.formatIntegrationResult(result);
+        },
       });
       return;
     }
     await runCommand({
-      label: "Updating LGTM",
-      successLabel: "Updated LGTM",
-      execute: async () => ({
-        action: "update" as const,
-        target,
-        cli: await CliUpdater.update(),
-        ...(await AgentUpdater.update({ target })),
-      }),
-      renderSuccess: formatIntegrationResult,
+      label: "Preparing lgtm update",
+      successLabel: "Update finished",
+      execute: async function execute(report) {
+        report.complete({ label: `Current version: ${CliUpdater.getCurrentVersion()}` });
+        report("Checking for updates");
+        const cliPlan = await CliUpdater.plan();
+        let cli;
+        if (cliPlan.status === "ready") {
+          report.complete({
+            label: `Update available: ${cliPlan.currentVersion} to ${cliPlan.latestVersion}`,
+          });
+          report("Updating CLI");
+          cli = await CliUpdater.update({ plan: cliPlan });
+          if (cli.status !== "updated") {
+            throw new Error("lgtm did not apply the available CLI update.");
+          }
+          report.complete({
+            label: `Updated CLI: ${cli.previousVersion} to ${cli.version}`,
+            detail: CommandUiRenderer.formatLogGroup({ outputs: [cli.output] }),
+          });
+        } else if (cliPlan.status === "current") {
+          cli = cliPlan;
+          report.complete({ label: "Already up to date" });
+        } else {
+          cli = cliPlan;
+          report.complete({ label: "CLI update unavailable", detail: `  ${cliPlan.reason}` });
+        }
+
+        const integrations = await AgentUpdater.update({
+          target,
+          onUpdate: function onUpdate(event) {
+            const name = CommandUiRenderer.formatIntegrationName({ target: event.target });
+            const label = `Updating integration: ${name}`;
+            if (event.phase === "started") {
+              report(label);
+              return;
+            }
+            report.complete({
+              label,
+              detail: CommandUiRenderer.formatLogGroup({ outputs: event.outputs }),
+            });
+          },
+        });
+        return { action: "update" as const, target, cli, ...integrations };
+      },
+      renderSuccess: function renderSuccess() {
+        return "Restart your agent session to reload lgtm integrations, or use the lgtm CLI now.";
+      },
     });
     return;
   }
@@ -299,7 +281,7 @@ async function main() {
       return;
     }
     await runCommand({
-      label: "Showing LGTM help",
+      label: "Showing lgtm help",
       execute: async () => undefined,
       renderSuccess: helpText,
     });
@@ -410,11 +392,11 @@ async function main() {
         throw new Error("result requires --review-path.");
       }
       await runCommand({
-        label: "Reading LGTM review result",
+        label: "Reading lgtm review result",
         execute: async () => await finishReview(cwd, reviewPath),
         renderSuccess: (result) =>
           !result.found
-            ? "No LGTM review found."
+            ? "No lgtm review found."
             : result.review.status === "open"
               ? `${result.formattedReview}\n\nReview is still open. Server left running.`
               : `${result.formattedReview}\n\nServer stopped: ${result.stoppedServer ? "yes" : "no"}`,
