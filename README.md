@@ -112,7 +112,7 @@ Start a new agent session after installing a plugin so it can load LGTM.
 
 ## Development
 
-LGTM uses [Vite+](https://viteplus.dev/), Node, and npm.
+lgtm uses [Vite+](https://viteplus.dev/), Node, and Bun.
 
 ```bash
 vp install
@@ -134,4 +134,4 @@ src/
   platform/    Git, filesystem, process, HTTP, and browser integration
 ```
 
-Run `bun run metadata:sync` after changing the package version. For a release, use `bun run release:patch`, `bun run release:minor`, or `bun run release:major`. The release script validates the project, updates plugin metadata, creates the release commit, and adds the matching tag. It does not push or publish.
+Run `bun run metadata:sync` after changing the package version. For a release, start from a clean worktree and use `bun run release:patch`, `bun run release:minor`, or `bun run release:major`. The release script validates the project, updates plugin metadata, creates the release commit, and adds the matching tag. Push the release with `git push origin HEAD --follow-tags`. The `v*` tag triggers `.github/workflows/release-artifact.yml`, which publishes to npm through trusted publishing and creates the GitHub release. Never run `npm publish` locally.

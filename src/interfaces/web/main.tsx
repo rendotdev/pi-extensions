@@ -1580,9 +1580,6 @@ function DocumentReviewSurface(props: {
 
   return (
     <div className="bg-surface">
-      {props.document.location ? (
-        <div className="pb-6 font-mono text-xs text-muted">{props.document.location}</div>
-      ) : null}
       <article
         ref={articleRef}
         onMouseUp={handleMouseUp}
