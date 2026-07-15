@@ -59,31 +59,27 @@ import {
 import DiffsWorker from "@pierre/diffs/worker/worker.js?worker";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import {
-  LgtmPreferences,
-  type DiffStyle,
-  type FileExpansion,
-  type FileExpansionOverride,
-} from "../../domain/preferences/preferences.ts";
+import { LgtmPreferences, type DiffStyle } from "../../domain/preferences/preferences.ts";
 import { ReviewHandoff } from "../../domain/review/review-handoff.ts";
+import type {
+  DocumentComment,
+  DocumentSource,
+  ReviewComment,
+  ReviewFile,
+  ReviewJson,
+  ReviewPayload,
+  ReviewSourceFile,
+} from "../../domain/review/review.ts";
 import { CommentDraft } from "./comment-draft.ts";
 import { PreferencesApi } from "./preferences-api.ts";
+import { ReviewApi, type ReviewAppState } from "./review-api.ts";
+import { ReviewCommentInteraction } from "./review-comment-interaction.ts";
+import { ReviewPresentation } from "./review-presentation.ts";
 import { ToastNotifications } from "./toast-notifications.ts";
 import { useReviewServerMonitor } from "./use-review-server-monitor.ts";
 import { ReviewWindowTitle } from "./window-title.ts";
 
-type ReviewSourceFile = {
-  id: string;
-  location: string;
-  language: string;
-  oldContent: string;
-  newContent: string;
-  added: number;
-  removed: number;
-};
-
 const parsedFileDiffCache = new WeakMap<ReviewSourceFile, FileDiffMetadata>();
-const defaultCollapsedChangedLineThreshold = 500;
 const largeDiffWordHighlightThreshold = 2_000;
 const snappyTransition = {
   duration: 0.14,
@@ -92,273 +88,14 @@ const snappyTransition = {
 const reviewIconSize = 14;
 const reviewIconStrokeWidth = 1.5;
 
-type ReviewComment = {
-  id: string;
-  fileLocation: string;
-  selectedRowIds: string[];
-  selectedText: string;
-  side: "additions" | "deletions";
-  selectedRange: SelectedLineRange;
-  startLine: number | null;
-  endLine: number | null;
-  lineNumbers: number[];
-  comment: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-type ReviewFile = {
-  location: string;
-  added: number;
-  removed: number;
-  comments: ReviewComment[];
-};
-
-type DocumentSource = {
-  location?: string;
-  markdown: string;
-};
-
-type DocumentComment = {
-  id: string;
-  selectedText: string;
-  startBlockId: string;
-  endBlockId: string;
-  startLine: number;
-  endLine: number;
-  prefix: string;
-  suffix: string;
-  comment: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-type ReviewStatus = "open" | "approved" | "changes_requested" | "canceled";
-
-type ReviewJson = {
-  version: 2;
-  kind: "diff" | "document";
-  status: ReviewStatus;
-  name: string;
-  sessionId: string;
-  reviewUUID: string;
-  reviewId: string;
-  cwd: string;
-  appDir: string;
-  url?: string;
-  reviewPath: string;
-  createdAt: string;
-  updatedAt: string;
-  finishedAt?: string;
-  files: ReviewFile[];
-  document?: DocumentSource;
-  documentComments: DocumentComment[];
-};
-
-type ReviewPayload = {
-  kind: "diff" | "document";
-  name: string;
-  sessionId: string;
-  reviewUUID: string;
-  reviewId: string;
-  cwd: string;
-  appDir: string;
-  reviewPath: string;
-  generatedAt: string;
-  files: ReviewSourceFile[];
-  document?: DocumentSource;
-};
-
-type AppState = {
-  payload: ReviewPayload;
-  review: ReviewJson;
-};
-
 type CommentAnnotationMetadata = {
   commentId: string;
 };
 
-function makeId() {
-  if (window.crypto && typeof window.crypto.randomUUID === "function") {
-    return window.crypto.randomUUID();
-  }
-  return "comment-" + Date.now() + "-" + Math.random().toString(16).slice(2);
-}
-
-async function loadState(): Promise<AppState> {
-  const [payloadResponse, reviewResponse] = await Promise.all([
-    fetch("/api/payload"),
-    fetch("/api/review"),
-  ]);
-  if (!payloadResponse.ok) {
-    throw new Error("Failed to load payload.");
-  }
-  if (!reviewResponse.ok) {
-    throw new Error("Failed to load review.");
-  }
-  const payload = (await payloadResponse.json()) as ReviewPayload;
-  const review = (await reviewResponse.json()) as ReviewJson;
-  return { payload, review };
-}
-
-async function saveReview(review: ReviewJson): Promise<ReviewJson> {
-  const response = await fetch("/api/review", {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(review),
-  });
-  if (!response.ok) {
-    throw new Error(await response.text());
-  }
-  return (await response.json()) as ReviewJson;
-}
-
-async function finishReviewRequest(
-  decision: "approved" | "changes_requested",
-): Promise<ReviewJson> {
-  const response = await fetch("/api/finish", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ decision }),
-  });
-  if (!response.ok) {
-    throw new Error(await response.text());
-  }
-  return (await response.json()) as ReviewJson;
-}
-
-async function cancelReviewRequest(): Promise<ReviewJson> {
-  const response = await fetch("/api/cancel", { method: "POST" });
-  if (!response.ok) {
-    throw new Error(await response.text());
-  }
-  return (await response.json()) as ReviewJson;
-}
-
-function reviewCommentCount(review: ReviewJson) {
-  if (review.kind === "document") {
-    return review.documentComments.filter((comment) => comment.comment.trim().length > 0).length;
-  }
-  return review.files.reduce(
-    (total, file) =>
-      total + file.comments.filter((comment) => comment.comment.trim().length > 0).length,
-    0,
-  );
-}
-
-function meaningfulReviewSignature(review: ReviewJson) {
-  if (review.kind === "document") {
-    return JSON.stringify(
-      review.documentComments.map((comment) => ({
-        id: comment.id,
-        selectedText: comment.selectedText,
-        startBlockId: comment.startBlockId,
-        endBlockId: comment.endBlockId,
-        startLine: comment.startLine,
-        endLine: comment.endLine,
-        prefix: comment.prefix,
-        suffix: comment.suffix,
-        comment: comment.comment,
-        createdAt: comment.createdAt,
-      })),
-    );
-  }
-  return JSON.stringify(
-    review.files.map((file) => ({
-      location: file.location,
-      comments: file.comments.map((comment) => ({
-        id: comment.id,
-        fileLocation: comment.fileLocation,
-        selectedRowIds: comment.selectedRowIds,
-        selectedText: comment.selectedText,
-        side: comment.side,
-        selectedRange: comment.selectedRange,
-        startLine: comment.startLine,
-        endLine: comment.endLine,
-        lineNumbers: comment.lineNumbers,
-        comment: comment.comment,
-        createdAt: comment.createdAt,
-      })),
-    })),
-  );
-}
-
-function updateReviewFile(
-  review: ReviewJson,
-  fileLocation: string,
-  updater: (file: ReviewFile) => ReviewFile,
-): ReviewJson {
-  let changed = false;
-  const files = review.files.map((file) => {
-    if (file.location !== fileLocation) {
-      return file;
-    }
-    const nextFile = updater(file);
-    if (nextFile !== file) {
-      changed = true;
-    }
-    return nextFile;
-  });
-
-  if (!changed) {
-    return review;
-  }
-  return {
-    ...review,
-    updatedAt: new Date().toISOString(),
-    files,
-  };
-}
-
-function getInitialCollapsedFileIds(
-  state: AppState,
-  fileExpansion: FileExpansion,
-  fileExpansionOverrides: Record<string, FileExpansionOverride>,
-) {
-  if (state.payload.kind !== "diff") {
-    return new Set<string>();
-  }
-
-  const collapsedFileIds = getBaseCollapsedFileIds(state, fileExpansion);
-  for (const file of state.payload.files) {
-    const override = fileExpansionOverrides[file.location];
-    if (override === "collapsed") {
-      collapsedFileIds.add(file.id);
-    }
-    if (override === "expanded") {
-      collapsedFileIds.delete(file.id);
-    }
-  }
-  return collapsedFileIds;
-}
-
-function getBaseCollapsedFileIds(state: AppState, fileExpansion: FileExpansion) {
-  if (fileExpansion === "expanded") {
-    return new Set<string>();
-  }
-
-  if (fileExpansion === "collapsed") {
-    return new Set(state.payload.files.map((file) => file.id));
-  }
-
-  const reviewFileByLocation = new Map(state.review.files.map((file) => [file.location, file]));
-  return new Set(
-    state.payload.files
-      .filter((file) => {
-        const reviewFile = reviewFileByLocation.get(file.location);
-        return (
-          file.added + file.removed >= defaultCollapsedChangedLineThreshold &&
-          !reviewFile?.comments.length
-        );
-      })
-      .map((file) => file.id),
-  );
-}
-
 function App() {
   const { resolvedTheme, setTheme, theme } = useTheme("system");
   const queryClient = useQueryClient();
-  const [state, setState] = useState<AppState | null>(null);
+  const [state, setState] = useState<ReviewAppState | null>(null);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [copiedReviewPath, setCopiedReviewPath] = useState(false);
   const [isFinishing, setIsFinishing] = useState(false);
@@ -398,12 +135,26 @@ function App() {
   });
   const reviewStateQuery = useQuery({
     queryKey: ["review-state"],
-    queryFn: loadState,
+    queryFn: function loadReviewState() {
+      return ReviewApi.load({});
+    },
     staleTime: Number.POSITIVE_INFINITY,
   });
-  const reviewSaveMutation = useMutation({ mutationFn: saveReview });
-  const finishReviewMutation = useMutation({ mutationFn: finishReviewRequest });
-  const cancelReviewMutation = useMutation({ mutationFn: cancelReviewRequest });
+  const reviewSaveMutation = useMutation({
+    mutationFn: function saveReview(review: ReviewJson) {
+      return ReviewApi.save({ review });
+    },
+  });
+  const finishReviewMutation = useMutation({
+    mutationFn: function finishReview(decision: "approved" | "changes_requested") {
+      return ReviewApi.finish({ decision });
+    },
+  });
+  const cancelReviewMutation = useMutation({
+    mutationFn: function cancelReview() {
+      return ReviewApi.cancel({});
+    },
+  });
   const preferences = preferencesQuery.data ?? LgtmPreferences.defaults;
   const diffStyle = preferences.diffStyle;
   const lineWrap = preferences.lineWrap;
@@ -429,13 +180,19 @@ function App() {
       return;
     }
     initializedReviewId.current = nextState.review.reviewId;
-    lastSavedSignature.current = meaningfulReviewSignature(nextState.review);
+    lastSavedSignature.current = ReviewPresentation.meaningfulSignature({
+      review: nextState.review,
+    });
     document.title = ReviewWindowTitle.format({
       cwd: nextState.payload.cwd,
       name: nextState.payload.name,
     });
     setCollapsedFileIds(
-      getInitialCollapsedFileIds(nextState, fileExpansion, fileExpansionOverrides),
+      ReviewPresentation.initialCollapsedFileIds({
+        state: nextState,
+        fileExpansion,
+        fileExpansionOverrides,
+      }),
     );
     setState(nextState);
   }, [fileExpansion, fileExpansionOverrides, preferencesReady, reviewStateQuery.data]);
@@ -450,7 +207,7 @@ function App() {
   useReviewServerMonitor({
     getCommentCount: function getCommentCount() {
       const review = latestReviewRef.current;
-      return review === null ? 0 : reviewCommentCount(review);
+      return review === null ? 0 : ReviewPresentation.commentCount({ review });
     },
   });
 
@@ -482,7 +239,9 @@ function App() {
   const saveDebouncer = useAsyncDebouncer(
     async (review: ReviewJson) => {
       const savedReview = await reviewSaveMutation.mutateAsync(review);
-      lastSavedSignature.current = meaningfulReviewSignature(savedReview);
+      lastSavedSignature.current = ReviewPresentation.meaningfulSignature({
+        review: savedReview,
+      });
       setLastSavedAt(new Date());
       return savedReview;
     },
@@ -541,7 +300,7 @@ function App() {
 
   const queueSave = useCallback(
     (review: ReviewJson) => {
-      if (meaningfulReviewSignature(review) === lastSavedSignature.current) {
+      if (ReviewPresentation.meaningfulSignature({ review }) === lastSavedSignature.current) {
         return;
       }
       void saveDebouncer.maybeExecute(review);
@@ -608,10 +367,10 @@ function App() {
       );
       const selectedText = selectedTextOverride?.trim()
         ? selectedTextOverride
-        : getSelectedText(file, side, startLine, endLine);
+        : ReviewCommentInteraction.selectedText({ file, side, startLine, endLine });
       const now = new Date().toISOString();
       const comment: ReviewComment = {
-        id: makeId(),
+        id: ReviewCommentInteraction.createId({}),
         fileLocation: file.location,
         selectedRowIds: [side + ":" + startLine + "-" + endLine],
         selectedText,
@@ -626,10 +385,14 @@ function App() {
       };
 
       commitReview((review) =>
-        updateReviewFile(review, file.location, (reviewFile) => ({
-          ...reviewFile,
-          comments: [...reviewFile.comments, comment],
-        })),
+        ReviewPresentation.updateFile({
+          review,
+          fileLocation: file.location,
+          updater: (reviewFile) => ({
+            ...reviewFile,
+            comments: [...reviewFile.comments, comment],
+          }),
+        }),
       );
       setActiveCommentId(comment.id);
     },
@@ -639,23 +402,27 @@ function App() {
   const updateComment = useCallback(
     (fileLocation: string, commentId: string, patch: Partial<ReviewComment>) => {
       commitReview((review) =>
-        updateReviewFile(review, fileLocation, (reviewFile) => {
-          let changed = false;
-          const comments = reviewFile.comments.map((comment) => {
-            if (comment.id !== commentId) {
-              return comment;
-            }
-            const nextComment = { ...comment, ...patch, updatedAt: new Date().toISOString() };
-            const hasChanged =
-              JSON.stringify({ ...comment, updatedAt: undefined }) !==
-              JSON.stringify({ ...nextComment, updatedAt: undefined });
-            if (!hasChanged) {
-              return comment;
-            }
-            changed = true;
-            return nextComment;
-          });
-          return changed ? { ...reviewFile, comments } : reviewFile;
+        ReviewPresentation.updateFile({
+          review,
+          fileLocation,
+          updater: (reviewFile) => {
+            let changed = false;
+            const comments = reviewFile.comments.map((comment) => {
+              if (comment.id !== commentId) {
+                return comment;
+              }
+              const nextComment = { ...comment, ...patch, updatedAt: new Date().toISOString() };
+              const hasChanged =
+                JSON.stringify({ ...comment, updatedAt: undefined }) !==
+                JSON.stringify({ ...nextComment, updatedAt: undefined });
+              if (!hasChanged) {
+                return comment;
+              }
+              changed = true;
+              return nextComment;
+            });
+            return changed ? { ...reviewFile, comments } : reviewFile;
+          },
         }),
       );
     },
@@ -665,11 +432,15 @@ function App() {
   const deleteComment = useCallback(
     (fileLocation: string, commentId: string) => {
       commitReview((review) =>
-        updateReviewFile(review, fileLocation, (reviewFile) => {
-          const comments = reviewFile.comments.filter((comment) => comment.id !== commentId);
-          return comments.length === reviewFile.comments.length
-            ? reviewFile
-            : { ...reviewFile, comments };
+        ReviewPresentation.updateFile({
+          review,
+          fileLocation,
+          updater: (reviewFile) => {
+            const comments = reviewFile.comments.filter((comment) => comment.id !== commentId);
+            return comments.length === reviewFile.comments.length
+              ? reviewFile
+              : { ...reviewFile, comments };
+          },
         }),
       );
     },
@@ -736,7 +507,10 @@ function App() {
     if (!state || isFinishing || isSaving) {
       return;
     }
-    if (decision === "changes_requested" && reviewCommentCount(state.review) === 0) {
+    if (
+      decision === "changes_requested" &&
+      ReviewPresentation.commentCount({ review: state.review }) === 0
+    ) {
       return;
     }
     setIsFinishing(true);
@@ -755,7 +529,9 @@ function App() {
     saveDebouncer.cancel();
     try {
       const savedReview = await reviewSaveMutation.mutateAsync(state.review);
-      lastSavedSignature.current = meaningfulReviewSignature(savedReview);
+      lastSavedSignature.current = ReviewPresentation.meaningfulSignature({
+        review: savedReview,
+      });
     } catch {
       setIsFinishing(false);
       setCopiedReviewPath(false);
@@ -802,7 +578,9 @@ function App() {
   }
 
   const primaryDecision =
-    state && reviewCommentCount(state.review) > 0 ? "changes_requested" : "approved";
+    state && ReviewPresentation.commentCount({ review: state.review }) > 0
+      ? "changes_requested"
+      : "approved";
   const canFinishReview =
     Boolean(state) && state?.review.status === "open" && !isFinishing && !isSaving;
   useHotkey(
@@ -825,7 +603,7 @@ function App() {
   }
 
   const { payload, review } = state;
-  const commentCount = reviewCommentCount(review);
+  const commentCount = ReviewPresentation.commentCount({ review });
   const isFinished = review.status !== "open";
   const decision = primaryDecision;
   const decisionButtonLabel = commentCount > 0 ? `Send (${commentCount})` : "Approve";
@@ -1702,7 +1480,7 @@ function DocumentReviewSurface(props: {
     const after = lines.slice(endLine).join("\n");
     const now = new Date().toISOString();
     currentProps.addComment({
-      id: makeId(),
+      id: ReviewCommentInteraction.createId({}),
       selectedText,
       startBlockId: blockId,
       endBlockId: blockId,
@@ -1758,23 +1536,15 @@ function DocumentReviewSurface(props: {
   function handleMouseUp() {
     window.setTimeout(() => {
       const root = articleRef.current;
-      const selection = document.getSelection();
-      if (!root || !selection || selection.isCollapsed || selection.rangeCount === 0) {
+      if (!root) {
         return;
       }
-      const selectedText = selection.toString().trim();
-      if (!selectedText) {
+      const textSelection = ReviewCommentInteraction.currentTextSelection({ root });
+      if (!textSelection) {
         return;
       }
-      const range = selection.getRangeAt(0);
-      const startElement = getElementFromNode(range.startContainer);
-      const endElement = getElementFromNode(range.endContainer);
-      if (
-        startElement?.closest("[data-review-comment]") ||
-        endElement?.closest("[data-review-comment]")
-      ) {
-        return;
-      }
+      const { selection, range, startElement, endElement } = textSelection;
+      const selectedText = textSelection.selectedText.trim();
       const startBlock = startElement?.closest<HTMLElement>("[data-document-block]");
       const endBlock = endElement?.closest<HTMLElement>("[data-document-block]");
       if (!startBlock || !endBlock || !root.contains(startBlock) || !root.contains(endBlock)) {
@@ -1788,7 +1558,7 @@ function DocumentReviewSurface(props: {
       const startOffset = beforeRange.toString().length;
       const now = new Date().toISOString();
       const comment: DocumentComment = {
-        id: makeId(),
+        id: ReviewCommentInteraction.createId({}),
         selectedText,
         startBlockId: startBlock.dataset.documentBlock ?? "",
         endBlockId: endBlock.dataset.documentBlock ?? "",
@@ -1826,62 +1596,6 @@ function DocumentReviewSurface(props: {
   );
 }
 
-const textSelectionCleanupByNode = new WeakMap<HTMLElement, () => void>();
-
-function installTextSelectionCommentHook(
-  node: HTMLElement,
-  phase: string,
-  file: ReviewSourceFile,
-  addTextSelectionComment: (range: SelectedLineRange, selectedText: string) => void,
-) {
-  if (phase === "unmount") {
-    textSelectionCleanupByNode.get(node)?.();
-    textSelectionCleanupByNode.delete(node);
-    return;
-  }
-
-  if (textSelectionCleanupByNode.has(node)) {
-    return;
-  }
-
-  const root = node.shadowRoot ?? node;
-  function handleMouseUp() {
-    window.setTimeout(() => {
-      const selection = getSelectionFromRoot(root);
-      const selectedText = selection?.toString() ?? "";
-      if (
-        !selection ||
-        selection.isCollapsed ||
-        selectedText.trim().length === 0 ||
-        selection.rangeCount === 0
-      ) {
-        return;
-      }
-
-      const range = selection.getRangeAt(0);
-      const startElement = getElementFromNode(range.startContainer);
-      const endElement = getElementFromNode(range.endContainer);
-      if (
-        startElement?.closest("[data-review-comment]") ||
-        endElement?.closest("[data-review-comment]")
-      ) {
-        return;
-      }
-
-      const selectedRange = getSelectedLineRangeFromNativeRange(root, range);
-      if (!selectedRange) {
-        return;
-      }
-
-      addTextSelectionComment(selectedRange, selectedText);
-      selection.removeAllRanges();
-    }, 0);
-  }
-
-  root.addEventListener("mouseup", handleMouseUp);
-  textSelectionCleanupByNode.set(node, () => root.removeEventListener("mouseup", handleMouseUp));
-}
-
 const reviewDiffUnsafeCSS = [
   ':host { --review-radius: 6px; --diffs-font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; --diffs-header-font-family: "Geist", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; --diffs-bg-hover-override: #0070f3; --diffs-bg-selection-override: #0070f3; --diffs-bg-selection-number-override: #0070f3; --diffs-selection-number-fg: #0070f3; }',
   '[data-diffs-header="default"] { padding-inline: 0 !important; border-radius: var(--review-radius) var(--review-radius) 0 0 !important; }',
@@ -1892,65 +1606,6 @@ const reviewDiffUnsafeCSS = [
   "[data-separator-content], [data-expand-button], [data-separator-wrapper] { border-color: var(--border) !important; border-radius: var(--review-radius) !important; }",
   "[data-separator-wrapper] { background-color: var(--border) !important; }",
 ].join("\n");
-
-function getSelectionFromRoot(root: ShadowRoot | HTMLElement): Selection | null {
-  const shadowSelection =
-    root instanceof ShadowRoot
-      ? (root as ShadowRoot & { getSelection?: () => Selection | null }).getSelection?.()
-      : null;
-  if (shadowSelection && !shadowSelection.isCollapsed) {
-    return shadowSelection;
-  }
-  return document.getSelection();
-}
-
-function getElementFromNode(node: Node | null): Element | null {
-  if (!node) {
-    return null;
-  }
-  return node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
-}
-
-function getLineSide(element: HTMLElement): "additions" | "deletions" {
-  const lineType = element.getAttribute("data-line-type") ?? "";
-  return lineType.includes("deletion") ? "deletions" : "additions";
-}
-
-function getSelectedLineRangeFromNativeRange(
-  root: ShadowRoot | HTMLElement,
-  range: Range,
-): SelectedLineRange | null {
-  const lineElements = Array.from(
-    root.querySelectorAll<HTMLElement>("[data-line][data-line-index]"),
-  ).filter((element) => {
-    try {
-      return range.intersectsNode(element);
-    } catch {
-      return false;
-    }
-  });
-
-  if (lineElements.length === 0) {
-    return null;
-  }
-
-  const hasAddition = lineElements.some((element) => getLineSide(element) === "additions");
-  const side: "additions" | "deletions" = hasAddition ? "additions" : "deletions";
-  const lineNumbers = lineElements
-    .filter((element) => getLineSide(element) === side)
-    .map((element) => Number.parseInt(element.getAttribute("data-line") ?? "", 10))
-    .filter((lineNumber) => Number.isFinite(lineNumber));
-
-  if (lineNumbers.length === 0) {
-    return null;
-  }
-  return {
-    start: Math.min(...lineNumbers),
-    end: Math.max(...lineNumbers),
-    side,
-    endSide: side,
-  };
-}
 
 const ReviewFileDiff = React.memo(function ReviewFileDiff(props: ReviewFileDiffProps) {
   const { file, reviewFile } = props;
@@ -2009,9 +1664,14 @@ const ReviewFileDiff = React.memo(function ReviewFileDiff(props: ReviewFileDiffP
         }
       },
       onPostRender: (node, _instance, phase) => {
-        installTextSelectionCommentHook(node, phase, file, (range, selectedText) => {
-          setSelectedLines(range);
-          propsRef.current.addComment(file, range, selectedText);
+        ReviewCommentInteraction.installTextSelection({
+          node,
+          phase,
+          file,
+          addComment: function addTextSelectionComment(range, selectedText) {
+            setSelectedLines(range);
+            propsRef.current.addComment(file, range, selectedText);
+          },
         });
       },
     }),
@@ -2221,7 +1881,7 @@ function CommentEditor(props: {
 
   useEffect(() => {
     if (textareaRef.current) {
-      resizeTextarea(textareaRef.current);
+      ReviewCommentInteraction.resizeTextarea({ textarea: textareaRef.current });
     }
   }, [props.id]);
 
@@ -2262,7 +1922,7 @@ function CommentEditor(props: {
               onBlur={field.handleBlur}
               onChange={(event) => {
                 field.handleChange(event.currentTarget.value);
-                resizeTextarea(event.currentTarget);
+                ReviewCommentInteraction.resizeTextarea({ textarea: event.currentTarget });
               }}
               onKeyDown={handleKeyDown}
               rows={1}
@@ -2286,24 +1946,6 @@ function CommentEditor(props: {
       </form.Field>
     </div>
   );
-}
-
-function getSelectedText(
-  file: ReviewSourceFile,
-  side: "additions" | "deletions",
-  startLine: number,
-  endLine: number,
-) {
-  const source = side === "additions" ? file.newContent : file.oldContent;
-  return source
-    .split(/\r\n|\r|\n/)
-    .slice(startLine - 1, endLine)
-    .join("\n");
-}
-
-function resizeTextarea(textarea: HTMLTextAreaElement) {
-  textarea.style.height = "auto";
-  textarea.style.height = Math.max(44, textarea.scrollHeight) + "px";
 }
 
 const queryClient = new QueryClient();

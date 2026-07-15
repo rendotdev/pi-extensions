@@ -37,7 +37,7 @@ const requiredPaths = [
   "package/.mcp.json",
   "package/bin/lgtm.mjs",
   "package/dist/cli.mjs",
-  "package/extensions/index.mjs",
+  "package/extensions/index.js",
   "package/skills/lgtm/SKILL.md",
 ];
 
@@ -110,13 +110,12 @@ try {
   }
 
   const piExtension = packageJson.pi?.extensions?.[0];
-  if (piExtension !== "extensions/index.mjs") {
-    throw new Error('package.json pi.extensions must point to "extensions/index.mjs"');
+  if (piExtension !== "extensions/index.js") {
+    throw new Error('package.json pi.extensions must point to "extensions/index.js"');
   }
   if (!entrySet.has(`package/${piExtension}`)) {
     throw new Error("package.json pi.extensions must point to a packaged file");
   }
-
   const piSkill = packageJson.pi?.skills?.[0];
   if (!piSkill || !entrySet.has(`package/${piSkill}`)) {
     const skillHasEntries = piSkill

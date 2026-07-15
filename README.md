@@ -120,7 +120,7 @@ vp dev
 vp check
 vp run package
 vp test
-npm run lgtm -- --help
+bun run lgtm --help
 ```
 
 `vp dev` starts the browser app with hot reload and uses the current workspace for its temporary review API. Set `LGTM_DEV_CWD=/path/to/repo` to review another workspace.
@@ -134,4 +134,4 @@ src/
   platform/    Git, filesystem, process, HTTP, and browser integration
 ```
 
-Run `npm run metadata:sync` after changing the package version. For a release, use `npm run release:patch`, `npm run release:minor`, or `npm run release:major`. The release script validates the project, updates plugin metadata, creates the release commit, and adds the matching tag. It does not push or publish.
+Run `bun run metadata:sync` after changing the package version. For a release, use `bun run release:patch`, `bun run release:minor`, or `bun run release:major`. The release script validates the project, updates plugin metadata, creates the release commit, and adds the matching tag. It does not push or publish.

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 type ReleaseType = "patch" | "minor" | "major";
@@ -29,8 +29,8 @@ assertTagDoesNotExist(tag);
 run("vp", ["check"]);
 run("vp", ["run", "package"]);
 run("vp", ["test"]);
-run("npm", ["version", releaseType, "--no-git-tag-version", "--ignore-scripts"]);
-run("npm", ["run", "metadata:sync"]);
+await writePackageVersion(nextVersion);
+run("bun", ["run", "metadata:sync"]);
 run("vp", ["check", "--fix"]);
 
 const bumpedVersion = await readPackageVersion();
@@ -38,11 +38,11 @@ if (bumpedVersion !== nextVersion) {
   throw new Error(`Expected package version ${nextVersion}, received ${bumpedVersion}.`);
 }
 
-run("npm", ["run", "metadata:check"]);
+run("bun", ["run", "metadata:check"]);
 run("git", [
   "add",
   "package.json",
-  "package-lock.json",
+  "bun.lock",
   ".agents/plugins/marketplace.json",
   ".claude-plugin/marketplace.json",
   ".claude-plugin/plugin.json",
@@ -65,6 +65,13 @@ async function readPackageVersion() {
     throw new Error("package.json must define a string version.");
   }
   return packageJson.version;
+}
+
+async function writePackageVersion(version: string) {
+  const packagePath = resolve(root, "package.json");
+  const packageJson = JSON.parse(await readFile(packagePath, "utf8")) as Record<string, unknown>;
+  packageJson.version = version;
+  await writeFile(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`, "utf8");
 }
 
 export function incrementVersion(version: string, type: ReleaseType) {

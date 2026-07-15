@@ -124,9 +124,33 @@ export default defineConfig(async ({ command, mode }): Promise<ViteUserConfig> =
       outDir: "dist",
       clean: false,
       deps: { neverBundle: ["ink", "jsonc-parser", "react"] },
+      outExtensions({ options }) {
+        const entries = Array.isArray(options.input)
+          ? options.input
+          : typeof options.input === "string"
+            ? [options.input]
+            : Object.values(options.input ?? {});
+        return entries.some((entry) => entry.endsWith("/interfaces/pi/index.ts"))
+          ? { js: ".js" }
+          : undefined;
+      },
     },
     run: {
       tasks: {
+        "artifact:pack": {
+          command: "bun pm pack --dry-run --ignore-scripts",
+          dependsOn: ["artifact:prepare"],
+          cache: false,
+        },
+        "artifact:prepare": {
+          command: 'bun -e "void 0"',
+          dependsOn: ["metadata:verify", "build:package"],
+          cache: false,
+        },
+        "artifact:verify": {
+          command: "bun scripts/verify-package.ts",
+          cache: false,
+        },
         "build:web": {
           command: "vp build",
           cache: true,
@@ -138,13 +162,42 @@ export default defineConfig(async ({ command, mode }): Promise<ViteUserConfig> =
           output: ["dist/cli.mjs"],
         },
         "build:pi": {
-          command: "vp pack src/interfaces/pi/index.ts --out-dir extensions",
+          command: "vp pack src/interfaces/pi/index.ts --out-dir extensions --clean",
           cache: true,
-          output: ["extensions/index.mjs"],
+          output: ["extensions/index.js"],
         },
-        package: {
-          command: 'node -e "" --',
+        "build:package": {
+          command: 'bun -e "void 0"',
           dependsOn: ["build:web", "build:cli", "build:pi"],
+          cache: false,
+        },
+        "lgtm:cli": {
+          command: "node dist/cli.mjs",
+          dependsOn: ["validate", "build:package"],
+          cache: false,
+        },
+        "metadata:verify": {
+          command: "bun scripts/sync-plugin-metadata.ts --check",
+          cache: false,
+        },
+        "metadata:write": {
+          command: "bun scripts/sync-plugin-metadata.ts",
+          cache: false,
+        },
+        "release:major:task": {
+          command: "bun scripts/release.ts major",
+          cache: false,
+        },
+        "release:minor:task": {
+          command: "bun scripts/release.ts minor",
+          cache: false,
+        },
+        "release:patch:task": {
+          command: "bun scripts/release.ts patch",
+          cache: false,
+        },
+        validate: {
+          command: "vp check",
           cache: false,
         },
       },

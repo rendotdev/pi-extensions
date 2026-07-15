@@ -36,14 +36,18 @@
   ],
   "type": "module",
   "scripts": {
-    "lgtm": "vp check && vp run package && node dist/cli.mjs",
-    "metadata:check": "bun scripts/sync-plugin-metadata.ts --check",
-    "metadata:sync": "bun scripts/sync-plugin-metadata.ts",
-    "pack:dry": "npm pack --dry-run",
-    "prepack": "npm run metadata:check && vp run package",
-    "release:patch": "bun scripts/release.ts patch",
-    "release:minor": "bun scripts/release.ts minor",
-    "release:major": "bun scripts/release.ts major"
+    "build": "vp build",
+    "check": "vp check",
+    "lgtm": "vp run lgtm:cli",
+    "metadata:check": "vp run metadata:verify",
+    "metadata:sync": "vp run metadata:write",
+    "pack:dry": "vp run artifact:pack",
+    "package": "vp run build:package",
+    "prepack": "vp run artifact:prepare",
+    "release:major": "vp run release:major:task",
+    "release:minor": "vp run release:minor:task",
+    "release:patch": "vp run release:patch:task",
+    "test": "vp test"
   },
   "dependencies": {
     "ink": "^7.1.0",
@@ -96,10 +100,10 @@
   "engines": {
     "node": ">=22.18.0"
   },
-  "packageManager": "npm@11.12.1",
+  "packageManager": "bun@1.3.14",
   "pi": {
     "extensions": [
-      "extensions/index.mjs"
+      "extensions/index.js"
     ],
     "skills": [
       "skills"

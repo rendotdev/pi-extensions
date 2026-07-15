@@ -63,7 +63,7 @@ for (const entry of updates) {
 
 if (checkOnly && changed.length > 0) {
   throw new Error(
-    `Plugin metadata is out of sync: ${changed.join(", ")}. Run npm run metadata:sync.`,
+    `Plugin metadata is out of sync: ${changed.join(", ")}. Run bun run metadata:sync.`,
   );
 }
 

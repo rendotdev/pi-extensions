@@ -8,5 +8,6 @@ pnpm-debug.log*
 .env.*
 !.env.example
 dist/
+extensions/
 coverage/
 .lgtm/
