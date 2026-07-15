@@ -1,4 +1,12 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 import {
@@ -9,10 +17,12 @@ import {
   CloseButton,
   Disclosure,
   DisclosureGroup,
+  Input,
   InputGroup,
   ScrollShadow,
   Spinner,
   TextArea,
+  TextField,
   Toast,
   Tooltip,
   ToggleButton,
@@ -71,9 +81,11 @@ import type {
   ReviewSourceFile,
 } from "../../domain/review/review.ts";
 import { CommentDraft } from "./comment-draft.ts";
+import { FileSearch } from "./file-search.ts";
 import { PreferencesApi } from "./preferences-api.ts";
 import { ReviewApi, type ReviewAppState } from "./review-api.ts";
 import { ReviewCommentInteraction } from "./review-comment-interaction.ts";
+import { ReviewFileNavigation } from "./review-file-navigation.ts";
 import { ReviewPresentation } from "./review-presentation.ts";
 import { ToastNotifications } from "./toast-notifications.ts";
 import { useReviewServerMonitor } from "./use-review-server-monitor.ts";
@@ -888,7 +900,13 @@ function App() {
 
       {payload.kind === "document" && payload.document ? (
         <main className="h-[calc(100dvh-var(--review-header-height,0px))] overflow-y-auto">
-          <div className={"mx-auto flex flex-col gap-4 px-4 pt-[5vh] pb-[50vh] " + contentMaxWidth}>
+          <div
+            className={
+              "mx-auto flex flex-col gap-4 px-4 pt-[var(--review-content-top)] pb-[50vh] " +
+              contentMaxWidth
+            }
+            data-review-content-frame=""
+          >
             <DocumentReviewSurface
               document={payload.document}
               comments={review.documentComments}
@@ -1000,14 +1018,38 @@ function DiffReviewList(props: {
   const sidebarResizeStartRef = useRef<{ clientX: number; width: number } | null>(null);
   const sidebarWidthRef = useRef(props.sidebarWidth);
   const scrollElementRef = useRef<HTMLElement | null>(null);
+  const restoringFileRef = useRef(false);
   const [sidebarWidth, setSidebarWidth] = useState(props.sidebarWidth);
+  const [fileQuery, setFileQuery] = useState("");
+  const deferredFileQuery = useDeferredValue(fileQuery);
+  const [selectedFileLocation, setSelectedFileLocation] = useState(() =>
+    ReviewFileNavigation.read({ search: window.location.search }),
+  );
   const [scrollMargin, setScrollMargin] = useState(0);
-  const getItemKey = useCallback(
+  const sidebarFiles = useMemo(
+    () => FileSearch.search({ files: props.payload.files, query: deferredFileQuery }),
+    [deferredFileQuery, props.payload.files],
+  );
+  useEffect(
+    function prepareFileSearchIndex() {
+      FileSearch.prepare({ files: props.payload.files });
+    },
+    [props.payload.files],
+  );
+  const getFileItemKey = useCallback(
     (index: number) => props.payload.files[index]?.id ?? index,
     [props.payload.files],
   );
+  const getSidebarItemKey = useCallback(
+    (index: number) => sidebarFiles[index]?.id ?? index,
+    [sidebarFiles],
+  );
   const fileIndexById = useMemo(
     () => new Map(props.payload.files.map((file, index) => [file.id, index])),
+    [props.payload.files],
+  );
+  const fileById = useMemo(
+    () => new Map(props.payload.files.map((file) => [file.id, file])),
     [props.payload.files],
   );
   const reviewFileByLocation = useMemo(
@@ -1015,10 +1057,10 @@ function DiffReviewList(props: {
     [props.review.files],
   );
   const sidebarVirtualizer = useVirtualizer({
-    count: props.payload.files.length,
+    count: sidebarFiles.length,
     estimateSize: () => 38,
     getScrollElement: () => sidebarScrollElementRef.current,
-    getItemKey,
+    getItemKey: getSidebarItemKey,
     overscan: 10,
     useFlushSync: false,
   });
@@ -1039,12 +1081,38 @@ function DiffReviewList(props: {
     count: props.payload.files.length,
     estimateSize,
     getScrollElement: () => scrollElementRef.current,
-    getItemKey,
+    getItemKey: getFileItemKey,
     overscan: 1,
     scrollMargin,
     useFlushSync: false,
   });
-  fileVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => false;
+  fileVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => restoringFileRef.current;
+
+  const scrollToFile = useCallback(
+    function scrollToFile(params: { fileId: string; updateUrl: boolean }) {
+      const fileIndex = fileIndexById.get(params.fileId);
+      const file = fileById.get(params.fileId);
+      if (fileIndex === undefined || !file) {
+        return;
+      }
+      if (params.updateUrl) {
+        const currentLocation = ReviewFileNavigation.read({ search: window.location.search });
+        setSelectedFileLocation(file.location);
+        if (currentLocation !== file.location) {
+          window.history.pushState(
+            {},
+            "",
+            ReviewFileNavigation.createHref({
+              href: window.location.href,
+              fileLocation: file.location,
+            }),
+          );
+        }
+      }
+      fileVirtualizer.scrollToIndex(fileIndex, { align: "start", behavior: "auto" });
+    },
+    [fileById, fileIndexById, fileVirtualizer],
+  );
 
   const handleFileExpandedChange = useCallback(
     (fileId: string, isExpanded: boolean) => {
@@ -1114,19 +1182,92 @@ function DiffReviewList(props: {
   }, [props.sidebarWidth]);
 
   useEffect(() => {
+    function updateSelectedFileFromUrl() {
+      setSelectedFileLocation(ReviewFileNavigation.read({ search: window.location.search }));
+    }
+    window.addEventListener("popstate", updateSelectedFileFromUrl);
+    return () => window.removeEventListener("popstate", updateSelectedFileFromUrl);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedFileLocation) {
+      return;
+    }
+    const file = props.payload.files.find(
+      (candidate) => candidate.location === selectedFileLocation,
+    );
+    if (!file) {
+      return;
+    }
+    const fileId = file.id;
+    const list = listRef.current;
+    if (!list) {
+      return;
+    }
+    restoringFileRef.current = true;
+    let frame: number | null = null;
+    let settleTimer: number | null = null;
+    let stopped = false;
+    function stopRestoring() {
+      stopped = true;
+      restoringFileRef.current = false;
+      Observer.disconnect();
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+      }
+      if (settleTimer !== null) {
+        window.clearTimeout(settleTimer);
+      }
+    }
+    function restoreSelectedFile() {
+      if (stopped) {
+        return;
+      }
+      const scrollElement = scrollElementRef.current;
+      const item = listRef.current?.querySelector<HTMLElement>(
+        `[data-review-file-item="${CSS.escape(fileId)}"]`,
+      );
+      if (item && scrollElement) {
+        const offset = item.getBoundingClientRect().top - scrollElement.getBoundingClientRect().top;
+        if (Math.abs(offset) <= 1) {
+          settleTimer ??= window.setTimeout(stopRestoring, 250);
+          return;
+        }
+        if (settleTimer !== null) {
+          window.clearTimeout(settleTimer);
+          settleTimer = null;
+        }
+        scrollElement.scrollTo({ behavior: "auto", top: scrollElement.scrollTop + offset });
+        frame = window.requestAnimationFrame(restoreSelectedFile);
+      } else {
+        if (settleTimer !== null) {
+          window.clearTimeout(settleTimer);
+          settleTimer = null;
+        }
+        scrollToFile({ fileId, updateUrl: false });
+      }
+    }
+    const Observer = new MutationObserver(restoreSelectedFile);
+    Observer.observe(list, {
+      attributeFilter: ["style"],
+      attributes: true,
+      childList: true,
+      subtree: true,
+    });
+    restoreSelectedFile();
+    return stopRestoring;
+  }, [props.payload.files, scrollMargin, scrollToFile, selectedFileLocation]);
+
+  useEffect(() => {
+    sidebarVirtualizer.scrollToOffset(0);
+  }, [fileQuery, sidebarVirtualizer]);
+
+  useEffect(() => {
     return () => {
       document.body.style.removeProperty("cursor");
       document.body.style.removeProperty("user-select");
     };
   }, []);
-
-  function scrollToFile(fileId: string) {
-    const fileIndex = fileIndexById.get(fileId);
-    if (fileIndex === undefined) {
-      return;
-    }
-    fileVirtualizer.scrollToIndex(fileIndex, { align: "start", behavior: "auto" });
-  }
 
   function resizeSidebar(nextWidth: number) {
     const maximumWidth = Math.min(480, window.innerWidth * 0.5);
@@ -1171,18 +1312,43 @@ function DiffReviewList(props: {
   }
 
   return (
-    <div className="flex h-[calc(100dvh-var(--review-header-height,0px))] min-h-0">
+    <div className="grid h-[calc(100dvh-var(--review-header-height,0px))] min-h-0 grid-cols-[auto_minmax(0,1fr)]">
       <aside
         className="relative flex h-full shrink-0 flex-col border-r border-border bg-surface"
         style={{ width: sidebarWidth }}
       >
-        <div className="border-b border-border px-4 py-3">
+        <div
+          className="border-b border-border px-4 pt-[var(--review-content-top)] pb-3"
+          data-review-sidebar-header=""
+        >
           <Typography type="body-sm" weight="semibold">
             Files
           </Typography>
-          <Typography type="body-xs" color="muted" className="mt-1 block leading-none">
-            {props.payload.files.length} changed
+          <Typography
+            type="body-xs"
+            color="muted"
+            className="mt-1 block leading-none"
+            aria-live="polite"
+          >
+            {fileQuery.trim()
+              ? `${sidebarFiles.length} of ${props.payload.files.length} files`
+              : `${props.payload.files.length} files`}
           </Typography>
+          <TextField
+            fullWidth
+            variant="secondary"
+            aria-label="Filter changed files"
+            value={fileQuery}
+            onChange={setFileQuery}
+            className="mt-3"
+          >
+            <Input
+              fullWidth
+              type="search"
+              placeholder="Search..."
+              className="h-8 px-2 py-1 text-xs"
+            />
+          </TextField>
         </div>
         <ScrollShadow
           ref={sidebarScrollElementRef}
@@ -1191,72 +1357,80 @@ function DiffReviewList(props: {
           className="min-h-0 flex-1 overflow-y-auto px-2 py-2"
           data-review-file-sidebar=""
         >
-          <nav
-            aria-label="Changed files"
-            className="relative"
-            style={{ height: sidebarVirtualizer.getTotalSize() }}
-          >
-            {sidebarVirtualizer.getVirtualItems().map((virtualFile) => {
-              const file = props.payload.files[virtualFile.index];
-              if (!file) {
-                return null;
-              }
-              const isCollapsed = props.collapsedFileIds.has(file.id);
-              const isAdded = file.oldContent.length === 0 && file.newContent.length > 0;
-              const isDeleted = file.newContent.length === 0 && file.oldContent.length > 0;
-              const fileStatus = isAdded ? "added" : isDeleted ? "deleted" : "modified";
-              return (
-                <div
-                  key={virtualFile.key}
-                  ref={sidebarVirtualizer.measureElement}
-                  data-index={virtualFile.index}
-                  className="absolute left-0 top-0 w-full pb-0.5"
-                  style={{ transform: `translateY(${virtualFile.start}px)` }}
-                >
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className={
-                      "h-auto w-full justify-start gap-2 px-2 py-2 text-left font-normal " +
-                      (isCollapsed ? "text-muted" : "text-foreground")
-                    }
-                    data-collapsed={isCollapsed ? "true" : "false"}
-                    data-file-status={fileStatus}
-                    data-review-file-link={file.id}
-                    onPress={() => scrollToFile(file.id)}
+          <nav aria-label="Changed files" className="relative min-h-full">
+            {sidebarFiles.length === 0 ? (
+              <Typography type="body-xs" color="muted" className="block px-2 py-3 text-center">
+                No matching files
+              </Typography>
+            ) : null}
+            <div className="relative" style={{ height: sidebarVirtualizer.getTotalSize() }}>
+              {sidebarVirtualizer.getVirtualItems().map((virtualFile) => {
+                const file = sidebarFiles[virtualFile.index];
+                if (!file) {
+                  return null;
+                }
+                const isCollapsed = props.collapsedFileIds.has(file.id);
+                const isAdded = file.oldContent.length === 0 && file.newContent.length > 0;
+                const isDeleted = file.newContent.length === 0 && file.oldContent.length > 0;
+                const fileStatus = isAdded ? "added" : isDeleted ? "deleted" : "modified";
+                return (
+                  <div
+                    key={virtualFile.key}
+                    ref={sidebarVirtualizer.measureElement}
+                    data-index={virtualFile.index}
+                    className="absolute left-0 top-0 w-full pb-0.5"
+                    style={{ transform: `translateY(${virtualFile.start}px)` }}
                   >
-                    {isAdded ? (
-                      <FilePlus
-                        className="shrink-0 text-green-600 dark:text-green-400"
-                        size={reviewIconSize}
-                        strokeWidth={reviewIconStrokeWidth}
-                        aria-hidden="true"
-                      />
-                    ) : isDeleted ? (
-                      <FileMinus
-                        className="shrink-0 text-red-600 dark:text-red-400"
-                        size={reviewIconSize}
-                        strokeWidth={reviewIconStrokeWidth}
-                        aria-hidden="true"
-                      />
-                    ) : (
-                      <FilePenLine
-                        className="shrink-0 text-amber-600 dark:text-amber-400"
-                        size={reviewIconSize}
-                        strokeWidth={reviewIconStrokeWidth}
-                        aria-hidden="true"
-                      />
-                    )}
-                    <span className="sr-only">{fileStatus}: </span>
-                    <span className="min-w-0 flex-1 truncate">{file.location}</span>
-                    <span className="flex shrink-0 gap-1 font-mono text-[10px] tabular-nums">
-                      <span className="text-green-600 dark:text-green-400">+{file.added}</span>
-                      <span className="text-red-600 dark:text-red-400">-{file.removed}</span>
-                    </span>
-                  </Button>
-                </div>
-              );
-            })}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className={
+                        "h-auto w-full justify-start gap-2 px-2 py-2 text-left font-normal " +
+                        (selectedFileLocation === file.location
+                          ? "bg-default text-foreground"
+                          : isCollapsed
+                            ? "text-muted"
+                            : "text-foreground")
+                      }
+                      aria-current={selectedFileLocation === file.location ? "location" : undefined}
+                      data-collapsed={isCollapsed ? "true" : "false"}
+                      data-file-status={fileStatus}
+                      data-review-file-link={file.id}
+                      onPress={() => scrollToFile({ fileId: file.id, updateUrl: true })}
+                    >
+                      {isAdded ? (
+                        <FilePlus
+                          className="shrink-0 text-green-600 dark:text-green-400"
+                          size={reviewIconSize}
+                          strokeWidth={reviewIconStrokeWidth}
+                          aria-hidden="true"
+                        />
+                      ) : isDeleted ? (
+                        <FileMinus
+                          className="shrink-0 text-red-600 dark:text-red-400"
+                          size={reviewIconSize}
+                          strokeWidth={reviewIconStrokeWidth}
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <FilePenLine
+                          className="shrink-0 text-amber-600 dark:text-amber-400"
+                          size={reviewIconSize}
+                          strokeWidth={reviewIconStrokeWidth}
+                          aria-hidden="true"
+                        />
+                      )}
+                      <span className="sr-only">{fileStatus}: </span>
+                      <span className="min-w-0 flex-1 truncate">{file.location}</span>
+                      <span className="flex shrink-0 gap-1 font-mono text-[10px] tabular-nums">
+                        <span className="text-green-600 dark:text-green-400">+{file.added}</span>
+                        <span className="text-red-600 dark:text-red-400">-{file.removed}</span>
+                      </span>
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
           </nav>
         </ScrollShadow>
         <SidebarThemeFooter theme={props.theme} setTheme={props.setTheme} />
@@ -1284,7 +1458,10 @@ function DiffReviewList(props: {
         data-review-diff-scroll=""
         className="min-w-0 flex-1 overflow-y-auto"
       >
-        <div className="mx-auto max-w-7xl px-4 pt-[5vh] pb-[50vh]">
+        <div
+          className="mx-auto max-w-7xl px-4 pt-[var(--review-content-top)] pb-[50vh]"
+          data-review-content-frame=""
+        >
           <div
             ref={listRef}
             data-review-file-list=""
@@ -1598,6 +1775,10 @@ const reviewDiffUnsafeCSS = [
   '[data-diffs-header="default"] { padding-inline: 0 !important; border-radius: var(--review-radius) var(--review-radius) 0 0 !important; }',
   '[data-diffs-header="default"] [data-header-content] { margin-left: 0 !important; }',
   '[data-diffs-header="default"] [data-metadata] { padding-right: 0 !important; }',
+  // Pierre adds vertical inset around the rows when its file header is disabled.
+  "[data-code] { padding-block: 0 !important; }",
+  // Pierre's scroll mode otherwise reserves a scrollbar gutter even when every line fits.
+  "[data-code] { overflow-x: auto !important; }",
   "[data-change-icon] { opacity: 0.72; transform: scale(0.9); transform-origin: center; }",
   "[data-diff-span] { border-radius: var(--review-radius) !important; }",
   "[data-separator-content], [data-expand-button], [data-separator-wrapper] { border-color: var(--border) !important; border-radius: var(--review-radius) !important; }",
@@ -1649,6 +1830,7 @@ const ReviewFileDiff = React.memo(function ReviewFileDiff(props: ReviewFileDiffP
       overflow: props.lineWrap ? "wrap" : "scroll",
       diffIndicators: "classic",
       hunkSeparators: "metadata",
+      disableFileHeader: true,
       lineDiffType: file.added + file.removed > largeDiffWordHighlightThreshold ? "none" : "word",
       unsafeCSS: reviewDiffUnsafeCSS,
       enableLineSelection: true,
@@ -1725,24 +1907,20 @@ const ReviewFileDiff = React.memo(function ReviewFileDiff(props: ReviewFileDiffP
         data-review-file-heading={file.id}
         className="sticky top-0 z-[5] bg-surface"
       >
-        <Disclosure.Trigger className="group flex w-full items-center justify-between gap-4 bg-surface px-4 py-3 text-left transition-colors duration-[var(--motion-duration)] ease-[var(--motion-ease)] hover:bg-surface-secondary">
+        <Disclosure.Trigger className="group flex w-full min-w-0 items-center justify-between gap-4 bg-surface py-3 pr-24 pl-4 text-left transition-colors duration-[var(--motion-duration)] ease-[var(--motion-ease)] hover:bg-surface-secondary">
           <span className="flex min-w-0 items-center gap-3">
             <Disclosure.Indicator className="shrink-0 text-muted transition-transform duration-[var(--motion-duration)] ease-[var(--motion-ease)] group-data-[expanded=true]:rotate-90" />
-            <span className="min-w-0">
-              <Typography
-                type="body-sm"
-                weight="semibold"
-                truncate
-                className="block text-foreground"
-              >
-                {file.location}
-              </Typography>
-              <Typography type="body-xs" color="muted" className="mt-1 block leading-none">
-                +{file.added} -{file.removed}
-              </Typography>
-            </span>
+            <Typography type="body-sm" weight="semibold" truncate className="block text-foreground">
+              {file.location}
+            </Typography>
           </span>
           <span className="flex shrink-0 items-center gap-2">
+            <Chip size="sm" variant="soft">
+              <Chip.Label className="flex gap-1 font-mono tabular-nums">
+                <span className="text-green-600 dark:text-green-400">+{file.added}</span>
+                <span className="text-red-600 dark:text-red-400">-{file.removed}</span>
+              </Chip.Label>
+            </Chip>
             {writtenCommentCount > 0 ? (
               <Chip size="sm" variant="soft" color="accent">
                 <Chip.Label>
@@ -1752,10 +1930,41 @@ const ReviewFileDiff = React.memo(function ReviewFileDiff(props: ReviewFileDiffP
             ) : null}
           </span>
         </Disclosure.Trigger>
+        <div className="absolute inset-y-0 right-3 z-10 flex items-center">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="font-normal"
+            onClick={copyPath}
+            aria-label="Copy file path"
+          >
+            {copied ? (
+              <Check
+                size={reviewIconSize}
+                strokeWidth={reviewIconStrokeWidth}
+                absoluteStrokeWidth
+                aria-hidden="true"
+              />
+            ) : (
+              <CopyIcon
+                size={reviewIconSize}
+                strokeWidth={reviewIconStrokeWidth}
+                absoluteStrokeWidth
+                aria-hidden="true"
+              />
+            )}
+            <Typography type="body-sm" weight="normal" className="leading-none">
+              {copied ? "Copied" : "Copy"}
+            </Typography>
+          </Button>
+        </div>
       </Disclosure.Heading>
       <Disclosure.Content className="border-t border-border !transition-none aria-hidden:border-t-0">
-        <Card className="border-0 shadow-none" variant="transparent">
-          <Card.Content className="bg-[var(--review-diff-background)] p-4">
+        <Card
+          className="border-0 !bg-[var(--review-diff-background)] !p-0 shadow-none"
+          variant="transparent"
+        >
+          <Card.Content className="bg-[var(--review-diff-background)] !p-0">
             <FileDiff<CommentAnnotationMetadata>
               className="block font-mono [--review-radius:var(--vercel-radius)]"
               fileDiff={fileDiff}
@@ -1779,36 +1988,6 @@ const ReviewFileDiff = React.memo(function ReviewFileDiff(props: ReviewFileDiffP
                   />
                 );
               }}
-              renderHeaderMetadata={() => (
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="font-normal"
-                    onClick={copyPath}
-                    aria-label="Copy file path"
-                  >
-                    {copied ? (
-                      <Check
-                        size={reviewIconSize}
-                        strokeWidth={reviewIconStrokeWidth}
-                        absoluteStrokeWidth
-                        aria-hidden="true"
-                      />
-                    ) : (
-                      <CopyIcon
-                        size={reviewIconSize}
-                        strokeWidth={reviewIconStrokeWidth}
-                        absoluteStrokeWidth
-                        aria-hidden="true"
-                      />
-                    )}
-                    <Typography type="body-sm" weight="normal" className="leading-none">
-                      {copied ? "Copied" : "Copy"}
-                    </Typography>
-                  </Button>
-                </div>
-              )}
             />
           </Card.Content>
         </Card>

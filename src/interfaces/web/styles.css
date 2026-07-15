@@ -18,6 +18,7 @@
   color-scheme: light;
   --motion-duration: 140ms;
   --motion-ease: cubic-bezier(0.2, 0, 0, 1);
+  --review-content-top: 0.75rem;
   --default-transition-duration: var(--motion-duration);
   --default-transition-timing-function: var(--motion-ease);
   --ease-smooth: var(--motion-ease);
