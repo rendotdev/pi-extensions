@@ -11,10 +11,10 @@
       "source": {
         "source": "npm",
         "package": "@rendotdev/lgtm",
-        "version": "0.1.20"
+        "version": "0.1.21"
       },
       "description": "Human approval for agent work, with code diff and Markdown review.",
-      "version": "0.1.20",
+      "version": "0.1.21",
       "author": {
         "name": "René-Pier Deshaies-Gélinas"
       },
