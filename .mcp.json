@@ -2,7 +2,7 @@
   "mcpServers": {
     "lgtm": {
       "command": "npx",
-      "args": ["-y", "@rendotdev/lgtm@0.1.24", "mcp"]
+      "args": ["-y", "@rendotdev/lgtm@0.1.25", "mcp"]
     }
   }
 }
