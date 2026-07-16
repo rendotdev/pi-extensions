@@ -14,7 +14,7 @@ export class TerminalIconsClass extends DomainClass<{}, {}> {
   private readonly loadingFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
   public loading(params: { frame: number }): string {
-    return this.loadingFrames[params.frame % this.loadingFrames.length] as string;
+    return this.loadingFrames[params.frame % this.loadingFrames.length];
   }
 }
 

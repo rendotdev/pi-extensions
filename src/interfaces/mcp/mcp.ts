@@ -1,16 +1,17 @@
 import { createInterface } from "node:readline";
 import { resolve } from "node:path";
 import {
-  collectGitReviewFiles,
   finishReview,
   openReview,
   stopReview,
   waitForReview,
   type OpenReviewOptions,
 } from "../../platform/review/review-platform.ts";
+import { GitReviewCommand } from "../../platform/review/git-review-command.ts";
 import type {
   DiffReviewFileInput,
   OpenReviewInput,
+  ReviewGroupInput,
   ReviewPointer,
 } from "../../domain/review/review.ts";
 
@@ -33,7 +34,7 @@ type McpTool = {
 };
 
 export type McpRuntimeDependencies = {
-  collectGitReviewFiles: typeof collectGitReviewFiles;
+  collectGitReview: typeof GitReviewCommand.collect;
   finishReview: typeof finishReview;
   openReview: typeof openReview;
   stopReview: typeof stopReview;
@@ -41,7 +42,7 @@ export type McpRuntimeDependencies = {
 };
 
 const defaultDependencies: McpRuntimeDependencies = {
-  collectGitReviewFiles,
+  collectGitReview: GitReviewCommand.collect.bind(GitReviewCommand),
   finishReview,
   openReview,
   stopReview,
@@ -56,14 +57,44 @@ const commonProperties = {
   name: { type: "string", description: "Human-readable review name." },
 };
 
+const remoteProperties = {
+  remote: {
+    type: "string",
+    description: "Optional OpenSSH destination or SSH config alias.",
+  },
+  remoteCwd: {
+    type: "string",
+    description: "Absolute repository path on the remote machine. Required with remote.",
+  },
+  sinceLast: {
+    type: "boolean",
+    description: "Review only changes since the newest compatible completed lgtm review.",
+  },
+};
+
+const groupsProperty = {
+  type: "array",
+  minItems: 1,
+  description: "Optional conceptual file groups in review order.",
+  items: {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      files: { type: "array", minItems: 1, items: { type: "string" } },
+    },
+    required: ["title", "files"],
+    additionalProperties: false,
+  },
+};
+
 export const mcpTools: McpTool[] = [
   {
     name: "open_git_review",
     description:
-      "Open the current Git changes for human review and wait for approval, requested changes, or cancellation.",
+      "Open local or SSH-hosted Git changes for human review and wait for approval, requested changes, or cancellation.",
     inputSchema: {
       type: "object",
-      properties: commonProperties,
+      properties: { ...commonProperties, ...remoteProperties, groups: groupsProperty },
       required: ["name"],
       additionalProperties: false,
     },
@@ -71,12 +102,17 @@ export const mcpTools: McpTool[] = [
   {
     name: "open_worktree_review",
     description:
-      "Open changes from a specific Git worktree for human review and wait for a decision.",
+      "Open changes from a local or SSH-hosted Git worktree for human review and wait for a decision.",
     inputSchema: {
       type: "object",
       properties: {
         ...commonProperties,
-        path: { type: "string", description: "Worktree path, relative to cwd or absolute." },
+        remote: remoteProperties.remote,
+        groups: groupsProperty,
+        path: {
+          type: "string",
+          description: "Local worktree path, or an absolute remote worktree path with remote.",
+        },
       },
       required: ["path"],
       additionalProperties: false,
@@ -90,6 +126,7 @@ export const mcpTools: McpTool[] = [
       type: "object",
       properties: {
         ...commonProperties,
+        groups: groupsProperty,
         files: {
           type: "array",
           minItems: 1,
@@ -147,7 +184,8 @@ function optionalString(argumentsValue: JsonObject, name: string) {
   if (value === undefined) {
     return undefined;
   }
-  if (typeof value !== "string" || value.length === 0) {
+  const isInvalidValue = typeof value !== "string" || value.length === 0;
+  if (isInvalidValue) {
     throw new Error(`${name} must be a non-empty string.`);
   }
   return value;
@@ -161,12 +199,25 @@ function requiredString(argumentsValue: JsonObject, name: string) {
   return value;
 }
 
+function optionalBoolean(argumentsValue: JsonObject, name: string) {
+  const value = argumentsValue[name];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "boolean") {
+    throw new Error(`${name} must be a boolean.`);
+  }
+  return value;
+}
+
 function jsonReviewFiles(value: unknown): DiffReviewFileInput[] {
-  if (!Array.isArray(value) || value.length === 0) {
+  const isInvalidFiles = !Array.isArray(value) || value.length === 0;
+  if (isInvalidFiles) {
     throw new Error("files must be a non-empty array.");
   }
   return value.map((entry, index) => {
-    if (!entry || typeof entry !== "object") {
+    const isInvalidEntry = !entry || typeof entry !== "object";
+    if (isInvalidEntry) {
       throw new Error(`files[${index}] must be an object.`);
     }
     const file = entry as JsonObject;
@@ -174,6 +225,43 @@ function jsonReviewFiles(value: unknown): DiffReviewFileInput[] {
       location: requiredString(file, "location"),
       oldContent: requiredStringAllowEmpty(file, "oldContent"),
       newContent: requiredStringAllowEmpty(file, "newContent"),
+    };
+  });
+}
+
+function optionalReviewGroups(value: unknown): ReviewGroupInput[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const isInvalidGroups = !Array.isArray(value) || value.length === 0;
+  if (isInvalidGroups) {
+    throw new Error("groups must be a non-empty array.");
+  }
+  return value.map((entry, index) => {
+    const isInvalidEntry = !entry || typeof entry !== "object" || Array.isArray(entry);
+    if (isInvalidEntry) {
+      throw new Error(`groups[${index}] must be an object.`);
+    }
+    const group = entry as JsonObject;
+    const extraKeys = Object.keys(group).filter((key) => key !== "title" && key !== "files");
+    if (extraKeys.length > 0) {
+      throw new Error(`groups[${index}] has unsupported fields: ${extraKeys.join(", ")}.`);
+    }
+    if (!Array.isArray(group.files)) {
+      throw new Error(`groups[${index}].files must be a non-empty array.`);
+    }
+    if (group.files.length === 0) {
+      throw new Error(`groups[${index}].files must be a non-empty array.`);
+    }
+    return {
+      title: requiredString(group, "title"),
+      files: group.files.map((file, fileIndex) => {
+        const isInvalidFile = typeof file !== "string" || file.length === 0;
+        if (isInvalidFile) {
+          throw new Error(`groups[${index}].files[${fileIndex}] must be a non-empty string.`);
+        }
+        return file;
+      }),
     };
   });
 }
@@ -246,7 +334,8 @@ export function createMcpToolHandler(dependencies: McpRuntimeDependencies = defa
     if (!activeOpen) {
       return;
     }
-    if (reviewPath && activeOpen.reviewPath !== reviewPath) {
+    const isDifferentReview = reviewPath && activeOpen.reviewPath !== reviewPath;
+    if (isDifferentReview) {
       return;
     }
     activeOpen.controller.abort(new DOMException(message, "AbortError"));
@@ -264,19 +353,46 @@ export function createMcpToolHandler(dependencies: McpRuntimeDependencies = defa
     const cwd = resolve(optionalString(args, "cwd") ?? process.cwd());
     const reviewName = optionalString(args, "name");
     if (name === "open_git_review") {
-      const files = await dependencies.collectGitReviewFiles(cwd, signal);
+      const collection = await dependencies.collectGitReview({
+        cwd,
+        remote: optionalString(args, "remote"),
+        remoteCwd: optionalString(args, "remoteCwd"),
+        sessionId: process.env.LGTM_SESSION_ID ?? process.env.CODEX_THREAD_ID,
+        signal,
+        sinceLast: optionalBoolean(args, "sinceLast"),
+      });
       return await openBlockingReview(
-        { kind: "diff", name: requiredString(args, "name"), files },
+        {
+          kind: "diff",
+          name: requiredString(args, "name"),
+          files: collection.files,
+          groups: optionalReviewGroups(args.groups),
+          checkpoint: collection.checkpoint,
+          source: collection.source,
+        },
         cwd,
         signal,
       );
     }
 
     if (name === "open_worktree_review") {
-      const worktree = resolve(cwd, requiredString(args, "path"));
-      const files = await dependencies.collectGitReviewFiles(worktree, signal);
+      const remote = optionalString(args, "remote");
+      const requestedWorktree = requiredString(args, "path");
+      const worktree = remote ? cwd : resolve(cwd, requestedWorktree);
+      const collection = await dependencies.collectGitReview({
+        cwd: worktree,
+        remote,
+        remoteCwd: remote ? requestedWorktree : undefined,
+        signal,
+      });
       return await openBlockingReview(
-        { kind: "diff", name: reviewName ?? "Worktree review", files },
+        {
+          kind: "diff",
+          name: reviewName ?? "Worktree review",
+          files: collection.files,
+          groups: optionalReviewGroups(args.groups),
+          source: collection.source,
+        },
         worktree,
         signal,
       );
@@ -288,6 +404,7 @@ export function createMcpToolHandler(dependencies: McpRuntimeDependencies = defa
           kind: "diff",
           name: reviewName ?? "JSON review",
           files: jsonReviewFiles(args.files),
+          groups: optionalReviewGroups(args.groups),
         },
         cwd,
         signal,
@@ -311,7 +428,8 @@ export function createMcpToolHandler(dependencies: McpRuntimeDependencies = defa
 
     if (name === "finish_review") {
       const result = await dependencies.finishReview(cwd, requiredString(args, "reviewPath"));
-      if (result.found && result.review.status === "open") {
+      const isReviewStillOpen = result.found && result.review.status === "open";
+      if (isReviewStillOpen) {
         abortActiveOpen(cwd, result.reviewPath, "Review stopped by finish_review.");
       }
       return result;
@@ -374,7 +492,9 @@ export function createMcpMessageHandler(
     if (request.method === "notifications/initialized") {
       return;
     }
-    if (request.method === "notifications/cancelled" || request.method === "$/cancelRequest") {
+    const isCancellation =
+      request.method === "notifications/cancelled" || request.method === "$/cancelRequest";
+    if (isCancellation) {
       const id = request.params?.requestId as JsonRpcId | undefined;
       if (id !== undefined) {
         calls.get(id)?.abort(new DOMException("Tool call canceled.", "AbortError"));
@@ -435,19 +555,21 @@ export function createMcpMessageHandler(
 }
 
 function isJsonRpcRequest(value: unknown): value is JsonRpcRequest {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  const isInvalidValue = !value || typeof value !== "object" || Array.isArray(value);
+  if (isInvalidValue) {
     return false;
   }
   const request = value as Record<string, unknown>;
-  if (request.jsonrpc !== "2.0" || typeof request.method !== "string") {
+  const isInvalidEnvelope = request.jsonrpc !== "2.0" || typeof request.method !== "string";
+  if (isInvalidEnvelope) {
     return false;
   }
-  if (
+  const isInvalidId =
     request.id !== undefined &&
     request.id !== null &&
     typeof request.id !== "string" &&
-    typeof request.id !== "number"
-  ) {
+    typeof request.id !== "number";
+  if (isInvalidId) {
     return false;
   }
   return request.params === undefined || isJsonObject(request.params);

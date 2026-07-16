@@ -106,12 +106,12 @@ export class CliUpdaterClass extends DomainClass<
     const scopeDirectory = dirname(this.params.packageRoot);
     const nodeModulesDirectory = dirname(scopeDirectory);
     const libDirectory = dirname(nodeModulesDirectory);
-    if (
+    const isOutsideGlobalInstallation =
       basename(this.params.packageRoot) !== "lgtm" ||
       basename(scopeDirectory) !== "@rendotdev" ||
       basename(nodeModulesDirectory) !== "node_modules" ||
-      basename(libDirectory) !== "lib"
-    ) {
+      basename(libDirectory) !== "lib";
+    if (isOutsideGlobalInstallation) {
       return {
         status: "skipped",
         reason: "lgtm is not running from a global npm installation.",
@@ -174,7 +174,10 @@ export class CliUpdaterClass extends DomainClass<
     } catch {
       throw new Error("npm returned an invalid latest lgtm version.");
     }
-    if (typeof value !== "string" || value.trim().length === 0) {
+    if (typeof value !== "string") {
+      throw new Error("npm returned an invalid latest lgtm version.");
+    }
+    if (value.trim().length === 0) {
       throw new Error("npm returned an invalid latest lgtm version.");
     }
     return value;
@@ -206,7 +209,10 @@ export class PackageVersionReaderClass extends DomainClass<{}, PackageVersionRea
     const manifest = JSON.parse(
       this.deps.readFileSync(join(params.packageRoot, "package.json"), "utf8"),
     ) as { version?: unknown };
-    if (typeof manifest.version !== "string" || manifest.version.trim().length === 0) {
+    if (typeof manifest.version !== "string") {
+      throw new Error("The lgtm package does not declare a valid version.");
+    }
+    if (manifest.version.trim().length === 0) {
       throw new Error("The lgtm package does not declare a valid version.");
     }
     return manifest.version;

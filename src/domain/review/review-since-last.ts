@@ -26,7 +26,9 @@ export class ReviewSinceLastBuilderClass extends DomainClass<{}, {}> {
       const oldContent = baseline?.newContent ?? current?.oldContent ?? "";
       const newContent = current?.newContent ?? params.currentContents.get(location) ?? oldContent;
 
-      if (oldContent === newContent || oldContent.includes("\0") || newContent.includes("\0")) {
+      const shouldSkipFile =
+        oldContent === newContent || oldContent.includes("\0") || newContent.includes("\0");
+      if (shouldSkipFile) {
         continue;
       }
       files.push({ location, oldContent, newContent });

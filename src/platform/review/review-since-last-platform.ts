@@ -20,6 +20,8 @@ type ReviewSinceLastCollectionParams = {
   reviewRoots: string[];
   currentFiles: DiffReviewFileInput[];
   sessionId?: string;
+  sourceKey?: string;
+  readCurrentContent?: (location: string) => Promise<string>;
 };
 
 type ReviewSinceLastPlatformDeps = {
@@ -59,7 +61,9 @@ export class ReviewSinceLastPlatformClass extends DomainClass<{}, ReviewSinceLas
     for (const file of baselineFiles) {
       currentContents.set(
         file.location,
-        await this.readWorkingTreeFile({ root: params.root, location: file.location }),
+        params.readCurrentContent
+          ? await params.readCurrentContent(file.location)
+          : await this.readWorkingTreeFile({ root: params.root, location: file.location }),
       );
     }
 
@@ -100,7 +104,10 @@ export class ReviewSinceLastPlatformClass extends DomainClass<{}, ReviewSinceLas
         }
         const appDir = resolve(root, entry.name);
         const payload = await this.readPayload(resolve(appDir, "payload.json"));
-        if (!payload || !this.isCompatible({ root: params.root, payload })) {
+        const isIncompatiblePayload =
+          !payload ||
+          !this.isCompatible({ root: params.root, payload, sourceKey: params.sourceKey });
+        if (isIncompatiblePayload) {
           continue;
         }
         const status = await this.readReviewStatus(
@@ -188,11 +195,17 @@ export class ReviewSinceLastPlatformClass extends DomainClass<{}, ReviewSinceLas
     }
   }
 
-  private isCompatible(params: { root: string; payload: ReviewPayload }): boolean {
-    if (
-      params.payload.kind !== "diff" ||
-      !Number.isFinite(Date.parse(params.payload.generatedAt))
-    ) {
+  private isCompatible(params: {
+    root: string;
+    payload: ReviewPayload;
+    sourceKey?: string;
+  }): boolean {
+    const isInvalidPayload =
+      params.payload.kind !== "diff" || !Number.isFinite(Date.parse(params.payload.generatedAt));
+    if (isInvalidPayload) {
+      return false;
+    }
+    if (params.payload.source?.key !== params.sourceKey) {
       return false;
     }
     return params.payload.files.every((file) =>
@@ -201,7 +214,8 @@ export class ReviewSinceLastPlatformClass extends DomainClass<{}, ReviewSinceLas
   }
 
   private isSafeLocation(params: { root: string; location: string }): boolean {
-    if (!params.location || isAbsolute(params.location)) {
+    const isUnsafeLocation = !params.location || isAbsolute(params.location);
+    if (isUnsafeLocation) {
       return false;
     }
     const pathRelativeToRoot = relative(params.root, resolve(params.root, params.location));

@@ -1,4 +1,4 @@
 interface:
   display_name: "LGTM"
-  short_description: "Review agent work with human approval"
-  default_prompt: "Use $lgtm to open one named LGTM review for this work and continue from the result."
+  short_description: "Review local or remote agent work with human approval"
+  default_prompt: "Use $lgtm to open one named lgtm review for this local or SSH-hosted work and continue from the result."

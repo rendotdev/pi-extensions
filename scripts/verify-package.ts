@@ -65,7 +65,8 @@ for (const entry of entries) {
   const relativePath = entry.slice("package/".length);
   const root = relativePath.split("/", 1)[0];
 
-  if (root && !allowedRoots.has(root)) {
+  const isUnexpectedRoot = root && !allowedRoots.has(root);
+  if (isUnexpectedRoot) {
     throw new Error(`Unexpected published path: ${entry}`);
   }
 }
@@ -92,6 +93,28 @@ try {
   const codexMcpJson = JSON.parse(await readFile(join(packageRoot, ".mcp.json"), "utf8")) as {
     mcpServers?: { lgtm?: { args?: string[]; command?: string; cwd?: string } };
   };
+  const builtCli = await readFile(join(packageRoot, "dist/cli.mjs"), "utf8");
+  const packagedSkill = await readFile(join(packageRoot, "skills/lgtm/SKILL.md"), "utf8");
+  const packagedPiExtension = await readFile(join(packageRoot, "extensions/index.js"), "utf8");
+
+  const isBuiltCliMissingRemoteReviewSupport =
+    !builtCli.includes("--remote-cwd") || !builtCli.includes("SSHGitRepositoryReaderClass");
+  if (isBuiltCliMissingRemoteReviewSupport) {
+    throw new Error("Packaged CLI must include remote SSH Git review support");
+  }
+
+  const isPackagedSkillMissingRemoteReviewSupport =
+    !packagedSkill.includes("--remote") || !packagedSkill.includes("remoteCwd");
+  if (isPackagedSkillMissingRemoteReviewSupport) {
+    throw new Error("Packaged skill must document remote SSH Git reviews");
+  }
+
+  const isPackagedPiExtensionMissingRemoteReviewSupport =
+    !packagedPiExtension.includes("remoteCwd") ||
+    !packagedPiExtension.includes("SSHGitRepositoryReaderClass");
+  if (isPackagedPiExtensionMissingRemoteReviewSupport) {
+    throw new Error("Packaged Pi extension must include remote SSH Git review support");
+  }
 
   if (packageJson.bin?.lgtm !== "bin/lgtm.mjs") {
     throw new Error('package.json must map bin.lgtm to "bin/lgtm.mjs"');
@@ -116,7 +139,8 @@ try {
     throw new Error("package.json pi.extensions must point to a packaged file");
   }
   const piSkill = packageJson.pi?.skills?.[0];
-  if (!piSkill || !entrySet.has(`package/${piSkill}`)) {
+  const isSkillDirectoryMissing = !piSkill || !entrySet.has(`package/${piSkill}`);
+  if (isSkillDirectoryMissing) {
     const skillHasEntries = piSkill
       ? entries.some((entry) => entry.startsWith(`package/${piSkill}/`))
       : false;

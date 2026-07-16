@@ -68,6 +68,30 @@ describe("review domain", () => {
     expect(rebuilt.files[0].comments[0]?.comment).toBe("Keep this comment");
   });
 
+  it("preserves SSH source identity in review state", () => {
+    const source = {
+      kind: "git" as const,
+      transport: "ssh" as const,
+      key: "ssh://ren@host:22/repo",
+      label: "host:/repo",
+    };
+    const review = ReviewBuilder.build({
+      kind: "diff",
+      name: "Remote review",
+      sessionId: "session",
+      reviewUUID: "review-uuid",
+      reviewId: "review-id",
+      cwd: "/project",
+      appDir: "/project/.lgtm/review-id",
+      reviewPath: "/project/.lgtm/review-id/review.json",
+      generatedAt: "2026-07-12T00:00:00.000Z",
+      files: [],
+      source,
+    });
+
+    expect(review.source).toEqual(source);
+  });
+
   it("formats a completed review for an agent", () => {
     const review = ReviewBuilder.build({
       kind: "diff",

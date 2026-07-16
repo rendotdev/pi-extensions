@@ -27,9 +27,19 @@ const reviewFileSchema = z.object({
   removed: z.number(),
   comments: z.array(reviewCommentSchema),
 });
+const reviewGroupSchema = z.object({
+  title: z.string(),
+  files: z.array(z.string()),
+});
 const documentSourceSchema = z.object({
   location: z.optional(z.string()),
   markdown: z.string(),
+});
+const gitReviewSourceSchema = z.object({
+  kind: z.literal("git"),
+  transport: z.literal("ssh"),
+  key: z.string(),
+  label: z.string(),
 });
 const documentCommentSchema = z.object({
   id: z.string(),
@@ -63,6 +73,7 @@ export const reviewSchema = z.object({
   updatedAt: z.string(),
   finishedAt: z.optional(z.string()),
   files: z.array(reviewFileSchema),
+  source: z.optional(gitReviewSourceSchema),
   document: z.optional(documentSourceSchema),
   documentComments: z.array(documentCommentSchema),
 });
@@ -87,6 +98,7 @@ export const reviewPayloadSchema = z.object({
       removed: z.number(),
     }),
   ),
+  groups: z.optional(z.array(reviewGroupSchema)),
   checkpoint: z.optional(
     z.array(
       z.object({
@@ -95,6 +107,7 @@ export const reviewPayloadSchema = z.object({
       }),
     ),
   ),
+  source: z.optional(gitReviewSourceSchema),
   document: z.optional(documentSourceSchema),
 });
 export const reviewManifestSchema = z.object({

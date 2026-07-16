@@ -1,18 +1,17 @@
 import { DomainClass } from "../../domain/domain-class.ts";
 
-type CommentDraftFinishDependencies = {
-  onDelete: () => void;
-  onFinish: (value: string) => void;
-};
-
 export class CommentDraftClass extends DomainClass<{}, {}> {
-  public finish(value: string, deps: CommentDraftFinishDependencies) {
-    if (value.trim().length === 0) {
-      deps.onDelete();
+  public finish(params: {
+    value: string;
+    onDelete: () => void;
+    onFinish: (value: string) => void;
+  }) {
+    if (params.value.trim().length === 0) {
+      params.onDelete();
       return;
     }
 
-    deps.onFinish(value);
+    params.onFinish(params.value);
   }
 }
 

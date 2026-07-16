@@ -25,7 +25,7 @@ describe("LgtmPiExtensionClass", () => {
     const Extension = new LgtmPiExtensionClass(
       {},
       {
-        collectGitReviewFiles: vi.fn(async () => []),
+        collectGitReview: vi.fn(async () => ({ files: [] })),
         finishReview,
         openReview: vi.fn(async (_input, options) => {
           reviewOptions = options;
@@ -44,7 +44,7 @@ describe("LgtmPiExtensionClass", () => {
       },
     );
 
-    Extension.register(pi);
+    Extension.register({ pi });
 
     expect(tools.map((tool) => tool.name)).toEqual([
       "lgtm-open-git-review",
@@ -89,6 +89,78 @@ describe("LgtmPiExtensionClass", () => {
     expect(finishReview).toHaveBeenCalledWith(
       "/tmp/project",
       ".lgtm/session-1-review-1/review.json",
+    );
+  });
+
+  it("passes remote Git fields through the native Pi tool", async () => {
+    const tools: ToolDefinition[] = [];
+    const openReview = vi.fn(async () => ({
+      name: "Remote",
+      sessionId: "session",
+      reviewUUID: "uuid",
+      reviewId: "session-uuid",
+      appDir: "/tmp/project/.lgtm/session-uuid",
+      url: "http://localhost:12345/",
+      reviewPath: "/tmp/project/.lgtm/session-uuid/review.json",
+    }));
+    const collectGitReview = vi.fn(async () => ({
+      files: [{ location: "remote.ts", oldContent: "old", newContent: "new" }],
+      source: {
+        kind: "git" as const,
+        transport: "ssh" as const,
+        key: "ssh://ren@host:22/repo",
+        label: "host:/repo",
+      },
+    }));
+    const Extension = new LgtmPiExtensionClass(
+      {},
+      {
+        collectGitReview,
+        finishReview: vi.fn(async () => ({ found: false as const })),
+        openReview,
+        resolvePath: resolve,
+        stopReviews: vi.fn(async () => false),
+      },
+    );
+    Extension.register({
+      pi: {
+        registerTool: (tool: ToolDefinition) => tools.push(tool),
+        on: vi.fn(),
+        sendUserMessage: vi.fn(),
+      } as unknown as ExtensionAPI,
+    });
+
+    const gitReviewTool = tools.find((tool) => tool.name === "lgtm-open-git-review");
+    await gitReviewTool?.execute(
+      "tool-call",
+      {
+        name: "Remote",
+        remote: "host",
+        remoteCwd: "/repo",
+        sinceLast: true,
+        groups: [{ title: "Runtime", files: ["remote.ts"] }],
+      },
+      undefined,
+      undefined,
+      {
+        cwd: "/tmp/project",
+        sessionManager: { getSessionId: () => "session" },
+      } as unknown as ExtensionContext,
+    );
+
+    expect(collectGitReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: "/tmp/project",
+        remote: "host",
+        remoteCwd: "/repo",
+        sinceLast: true,
+      }),
+    );
+    expect(openReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groups: [{ title: "Runtime", files: ["remote.ts"] }],
+      }),
+      expect.anything(),
     );
   });
 });

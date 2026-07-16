@@ -86,6 +86,7 @@ import { PreferencesApi } from "./preferences-api.ts";
 import { ReviewApi, type ReviewAppState } from "./review-api.ts";
 import { ReviewCommentInteraction } from "./review-comment-interaction.ts";
 import { ReviewFileNavigation } from "./review-file-navigation.ts";
+import { ReviewGroupPresentation } from "./review-group-presentation.ts";
 import { ReviewPresentation } from "./review-presentation.ts";
 import { ToastNotifications } from "./toast-notifications.ts";
 import { useReviewServerMonitor } from "./use-review-server-monitor.ts";
@@ -184,7 +185,8 @@ function App() {
   }, [preferencesQuery.error]);
 
   useEffect(() => {
-    if (!reviewStateQuery.data || !preferencesReady) {
+    const shouldWaitForReview = !reviewStateQuery.data || !preferencesReady;
+    if (shouldWaitForReview) {
       return;
     }
     const nextState = reviewStateQuery.data;
@@ -516,13 +518,14 @@ function App() {
   }
 
   async function finishReview(decision: "approved" | "changes_requested") {
-    if (!state || isFinishing || isSaving) {
+    const isReviewBusy = !state || isFinishing || isSaving;
+    if (isReviewBusy) {
       return;
     }
-    if (
+    const isEmptyChangeRequest =
       decision === "changes_requested" &&
-      ReviewPresentation.commentCount({ review: state.review }) === 0
-    ) {
+      ReviewPresentation.commentCount({ review: state.review }) === 0;
+    if (isEmptyChangeRequest) {
       return;
     }
     setIsFinishing(true);
@@ -570,7 +573,8 @@ function App() {
   }
 
   async function cancelReview() {
-    if (!state || isFinishing || isSaving) {
+    const isReviewBusy = !state || isFinishing || isSaving;
+    if (isReviewBusy) {
       return;
     }
     setIsFinishing(true);
@@ -994,6 +998,33 @@ const ReviewFileRow = React.memo(function ReviewFileRow(
   );
 });
 
+function ReviewGroupHeader(props: {
+  added: number;
+  fileCount: number;
+  removed: number;
+  title: string;
+}) {
+  return (
+    <div
+      className="flex items-end justify-between gap-4 border-b border-border px-1 pb-3 pt-1"
+      data-review-group-header=""
+    >
+      <div className="min-w-0">
+        <Typography type="h5" weight="semibold" className="truncate">
+          {props.title}
+        </Typography>
+        <Typography type="body-xs" color="muted" className="mt-1 block">
+          {props.fileCount} {props.fileCount === 1 ? "file" : "files"}
+        </Typography>
+      </div>
+      <span className="flex shrink-0 gap-2 font-mono text-xs tabular-nums">
+        <span className="text-green-600 dark:text-green-400">+{props.added}</span>
+        <span className="text-red-600 dark:text-red-400">-{props.removed}</span>
+      </span>
+    </div>
+  );
+}
+
 function DiffReviewList(props: {
   payload: ReviewPayload;
   review: ReviewJson;
@@ -1030,23 +1061,88 @@ function DiffReviewList(props: {
     () => FileSearch.search({ files: props.payload.files, query: deferredFileQuery }),
     [deferredFileQuery, props.payload.files],
   );
+  const sidebarGroups = useMemo(
+    () => ReviewGroupPresentation.build({ files: sidebarFiles, groups: props.payload.groups }),
+    [props.payload.groups, sidebarFiles],
+  );
+  const sidebarItems = useMemo(
+    () =>
+      sidebarGroups.flatMap((group, groupIndex) => {
+        const fileItems = group.files.map((file) => ({ kind: "file" as const, file }));
+        return group.title
+          ? [
+              {
+                kind: "group" as const,
+                key: `group-${groupIndex}-${group.title}`,
+                title: group.title,
+                fileCount: group.files.length,
+              },
+              ...fileItems,
+            ]
+          : fileItems;
+      }),
+    [sidebarGroups],
+  );
+  const reviewGroups = useMemo(
+    () =>
+      ReviewGroupPresentation.build({
+        files: props.payload.files,
+        groups: props.payload.groups,
+      }),
+    [props.payload.files, props.payload.groups],
+  );
+  const reviewItems = useMemo(
+    () =>
+      reviewGroups.flatMap((group, groupIndex) => {
+        const fileItems = group.files.map((file) => ({ kind: "file" as const, file }));
+        if (!group.title) {
+          return fileItems;
+        }
+        const totals = group.files.reduce(
+          (sum, file) => ({ added: sum.added + file.added, removed: sum.removed + file.removed }),
+          { added: 0, removed: 0 },
+        );
+        return [
+          {
+            kind: "group" as const,
+            key: `group-${groupIndex}-${group.title}`,
+            title: group.title,
+            fileCount: group.files.length,
+            ...totals,
+          },
+          ...fileItems,
+        ];
+      }),
+    [reviewGroups],
+  );
   useEffect(
     function prepareFileSearchIndex() {
       FileSearch.prepare({ files: props.payload.files });
     },
     [props.payload.files],
   );
-  const getFileItemKey = useCallback(
-    (index: number) => props.payload.files[index]?.id ?? index,
-    [props.payload.files],
+  const getReviewItemKey = useCallback(
+    (index: number) => {
+      const item = reviewItems[index];
+      return item?.kind === "file" ? item.file.id : (item?.key ?? index);
+    },
+    [reviewItems],
   );
   const getSidebarItemKey = useCallback(
-    (index: number) => sidebarFiles[index]?.id ?? index,
-    [sidebarFiles],
+    (index: number) => {
+      const item = sidebarItems[index];
+      return item?.kind === "file" ? item.file.id : (item?.key ?? index);
+    },
+    [sidebarItems],
   );
   const fileIndexById = useMemo(
-    () => new Map(props.payload.files.map((file, index) => [file.id, index])),
-    [props.payload.files],
+    () =>
+      new Map(
+        reviewItems.flatMap((item, index) =>
+          item.kind === "file" ? ([[item.file.id, index]] as const) : [],
+        ),
+      ),
+    [reviewItems],
   );
   const fileById = useMemo(
     () => new Map(props.payload.files.map((file) => [file.id, file])),
@@ -1057,8 +1153,8 @@ function DiffReviewList(props: {
     [props.review.files],
   );
   const sidebarVirtualizer = useVirtualizer({
-    count: sidebarFiles.length,
-    estimateSize: () => 38,
+    count: sidebarItems.length,
+    estimateSize: (index) => (sidebarItems[index]?.kind === "group" ? 34 : 38),
     getScrollElement: () => sidebarScrollElementRef.current,
     getItemKey: getSidebarItemKey,
     overscan: 10,
@@ -1066,33 +1162,38 @@ function DiffReviewList(props: {
   });
   const estimateSize = useCallback(
     (index: number) => {
-      const file = props.payload.files[index];
-      if (!file) {
+      const item = reviewItems[index];
+      if (!item) {
         return 120;
       }
+      if (item.kind === "group") {
+        return 72;
+      }
+      const file = item.file;
       if (props.collapsedFileIds.has(file.id)) {
         return 82;
       }
       return Math.max(120, 112 + (file.added + file.removed) * 22);
     },
-    [props.collapsedFileIds, props.payload.files],
+    [props.collapsedFileIds, reviewItems],
   );
-  const fileVirtualizer = useVirtualizer({
-    count: props.payload.files.length,
+  const reviewVirtualizer = useVirtualizer({
+    count: reviewItems.length,
     estimateSize,
     getScrollElement: () => scrollElementRef.current,
-    getItemKey: getFileItemKey,
+    getItemKey: getReviewItemKey,
     overscan: 1,
     scrollMargin,
     useFlushSync: false,
   });
-  fileVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => restoringFileRef.current;
+  reviewVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => restoringFileRef.current;
 
   const scrollToFile = useCallback(
     function scrollToFile(params: { fileId: string; updateUrl: boolean }) {
       const fileIndex = fileIndexById.get(params.fileId);
       const file = fileById.get(params.fileId);
-      if (fileIndex === undefined || !file) {
+      const isFileMissing = fileIndex === undefined || !file;
+      if (isFileMissing) {
         return;
       }
       if (params.updateUrl) {
@@ -1109,9 +1210,9 @@ function DiffReviewList(props: {
           );
         }
       }
-      fileVirtualizer.scrollToIndex(fileIndex, { align: "start", behavior: "auto" });
+      reviewVirtualizer.scrollToIndex(fileIndex, { align: "start", behavior: "auto" });
     },
-    [fileById, fileIndexById, fileVirtualizer],
+    [fileById, fileIndexById, reviewVirtualizer],
   );
 
   const handleFileExpandedChange = useCallback(
@@ -1123,7 +1224,7 @@ function DiffReviewList(props: {
             `[data-review-file-item="${CSS.escape(fileId)}"]`,
           );
           if (item) {
-            fileVirtualizer.measureElement(item);
+            reviewVirtualizer.measureElement(item);
           }
         });
       }
@@ -1134,14 +1235,14 @@ function DiffReviewList(props: {
         );
         const heading = item?.querySelector<HTMLElement>("[data-review-file-heading]");
         const scrollElement = scrollElementRef.current;
-        if (
+        const isHeadingPinned =
           item &&
           heading &&
           scrollElement &&
           Math.abs(
             heading.getBoundingClientRect().top - scrollElement.getBoundingClientRect().top,
-          ) <= 1
-        ) {
+          ) <= 1;
+        if (isHeadingPinned) {
           const headingInset = Number.parseFloat(
             getComputedStyle(heading.parentElement ?? heading).borderTopWidth,
           );
@@ -1160,13 +1261,14 @@ function DiffReviewList(props: {
 
       commitExpandedChange();
     },
-    [fileVirtualizer, props.setFileExpanded],
+    [props.setFileExpanded, reviewVirtualizer],
   );
 
   useLayoutEffect(() => {
     const list = listRef.current;
     const scrollElement = scrollElementRef.current;
-    if (!list || !scrollElement) {
+    const isReviewListMissing = !list || !scrollElement;
+    if (isReviewListMissing) {
       return;
     }
     setScrollMargin(
@@ -1227,7 +1329,8 @@ function DiffReviewList(props: {
       const item = listRef.current?.querySelector<HTMLElement>(
         `[data-review-file-item="${CSS.escape(fileId)}"]`,
       );
-      if (item && scrollElement) {
+      const canRestoreFile = item && scrollElement;
+      if (canRestoreFile) {
         const offset = item.getBoundingClientRect().top - scrollElement.getBoundingClientRect().top;
         if (Math.abs(offset) <= 1) {
           settleTimer ??= window.setTimeout(stopRestoring, 250);
@@ -1303,7 +1406,8 @@ function DiffReviewList(props: {
   }
 
   function resizeSidebarWithKeyboard(event: React.KeyboardEvent<HTMLDivElement>) {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+    const isResizeKey = event.key === "ArrowLeft" || event.key === "ArrowRight";
+    if (!isResizeKey) {
       return;
     }
     event.preventDefault();
@@ -1365,10 +1469,34 @@ function DiffReviewList(props: {
             ) : null}
             <div className="relative" style={{ height: sidebarVirtualizer.getTotalSize() }}>
               {sidebarVirtualizer.getVirtualItems().map((virtualFile) => {
-                const file = sidebarFiles[virtualFile.index];
-                if (!file) {
+                const item = sidebarItems[virtualFile.index];
+                if (!item) {
                   return null;
                 }
+                if (item.kind === "group") {
+                  return (
+                    <div
+                      key={virtualFile.key}
+                      ref={sidebarVirtualizer.measureElement}
+                      data-index={virtualFile.index}
+                      className="absolute left-0 top-0 flex w-full items-center justify-between gap-2 px-2 pb-1 pt-3"
+                      style={{ transform: `translateY(${virtualFile.start}px)` }}
+                      data-review-sidebar-group=""
+                    >
+                      <Typography
+                        type="body-xs"
+                        weight="semibold"
+                        className="min-w-0 truncate uppercase tracking-[0.08em]"
+                      >
+                        {item.title}
+                      </Typography>
+                      <Typography type="body-xs" color="muted" className="shrink-0 tabular-nums">
+                        {item.fileCount}
+                      </Typography>
+                    </div>
+                  );
+                }
+                const file = item.file;
                 const isCollapsed = props.collapsedFileIds.has(file.id);
                 const isAdded = file.oldContent.length === 0 && file.newContent.length > 0;
                 const isDeleted = file.newContent.length === 0 && file.oldContent.length > 0;
@@ -1466,16 +1594,37 @@ function DiffReviewList(props: {
             ref={listRef}
             data-review-file-list=""
             style={{
-              height: fileVirtualizer.getTotalSize(),
+              height: reviewVirtualizer.getTotalSize(),
               overflowAnchor: "none",
               position: "relative",
             }}
           >
-            {fileVirtualizer.getVirtualItems().map((virtualFile) => {
-              const file = props.payload.files[virtualFile.index];
-              if (!file) {
+            {reviewVirtualizer.getVirtualItems().map((virtualFile) => {
+              const item = reviewItems[virtualFile.index];
+              if (!item) {
                 return null;
               }
+              if (item.kind === "group") {
+                return (
+                  <div
+                    key={virtualFile.key}
+                    ref={reviewVirtualizer.measureElement}
+                    data-index={virtualFile.index}
+                    className="absolute left-0 top-0 w-full pb-4"
+                    style={{
+                      top: virtualFile.start - reviewVirtualizer.options.scrollMargin,
+                    }}
+                  >
+                    <ReviewGroupHeader
+                      added={item.added}
+                      fileCount={item.fileCount}
+                      removed={item.removed}
+                      title={item.title}
+                    />
+                  </div>
+                );
+              }
+              const file = item.file;
               const reviewFile = reviewFileByLocation.get(file.location) || {
                 location: file.location,
                 added: file.added,
@@ -1490,12 +1639,12 @@ function DiffReviewList(props: {
               return (
                 <div
                   key={virtualFile.key}
-                  ref={fileVirtualizer.measureElement}
+                  ref={reviewVirtualizer.measureElement}
                   data-index={virtualFile.index}
                   data-review-file-item={file.id}
                   className="absolute left-0 top-0 w-full pb-4"
                   style={{
-                    top: virtualFile.start - fileVirtualizer.options.scrollMargin,
+                    top: virtualFile.start - reviewVirtualizer.options.scrollMargin,
                   }}
                 >
                   <ReviewFileRow
@@ -1724,7 +1873,9 @@ function DocumentReviewSurface(props: {
       const selectedText = textSelection.selectedText.trim();
       const startBlock = startElement?.closest<HTMLElement>("[data-document-block]");
       const endBlock = endElement?.closest<HTMLElement>("[data-document-block]");
-      if (!startBlock || !endBlock || !root.contains(startBlock) || !root.contains(endBlock)) {
+      const isSelectionOutsideDocument =
+        !startBlock || !endBlock || !root.contains(startBlock) || !root.contains(endBlock);
+      if (isSelectionOutsideDocument) {
         return;
       }
 
@@ -2042,17 +2193,21 @@ function CommentEditor(props: {
   });
 
   function finishComment(value: string) {
-    CommentDraft.finish(value, { onDelete: props.onDelete, onFinish: props.onFinish });
+    CommentDraft.finish({ value, onDelete: props.onDelete, onFinish: props.onFinish });
     props.setActiveCommentId(null);
   }
 
   useEffect(() => {
-    if (!props.active || !textareaRef.current) {
+    if (!props.active) {
       return;
     }
-    textareaRef.current.focus();
-    textareaRef.current.selectionStart = textareaRef.current.value.length;
-    textareaRef.current.selectionEnd = textareaRef.current.value.length;
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+    textarea.focus();
+    textarea.selectionStart = textarea.value.length;
+    textarea.selectionEnd = textarea.value.length;
   }, [props.active, props.id]);
 
   useEffect(() => {
@@ -2062,7 +2217,8 @@ function CommentEditor(props: {
   }, [props.id]);
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && !event.shiftKey) {
+    const shouldFinishComment = event.key === "Enter" && !event.shiftKey;
+    if (shouldFinishComment) {
       event.preventDefault();
       event.currentTarget.blur();
     }

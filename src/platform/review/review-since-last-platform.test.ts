@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { ReviewJson, ReviewPayload, ReviewStatus } from "../../domain/review/review.ts";
 import { ReviewSinceLastPlatform } from "./review-since-last-platform.ts";
 
@@ -214,6 +214,41 @@ describe("ReviewSinceLastPlatformClass", () => {
       files: [{ location: "changed.ts", oldContent: "reviewed-here", newContent: "follow-up" }],
     });
   });
+
+  it("isolates remote baselines by SSH source key and reads current content remotely", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lgtm-since-last-"));
+    temporaryDirectories.push(root);
+    await writePayload(root, {
+      reviewId: "other-host",
+      generatedAt: "2026-07-14T12:00:00.000Z",
+      location: "changed.ts",
+      newContent: "other",
+      sourceKey: "ssh://ren@other:22/repo",
+    });
+    await writePayload(root, {
+      reviewId: "matching-host",
+      generatedAt: "2026-07-14T11:00:00.000Z",
+      location: "changed.ts",
+      newContent: "reviewed",
+      sourceKey: "ssh://ren@host:22/repo",
+    });
+    const readCurrentContent = vi.fn(async () => "follow-up");
+
+    await expect(
+      ReviewSinceLastPlatform.collect({
+        root: "/repo",
+        reviewRoots: [join(root, ".lgtm")],
+        currentFiles: [{ location: "changed.ts", oldContent: "base", newContent: "follow-up" }],
+        sourceKey: "ssh://ren@host:22/repo",
+        readCurrentContent,
+      }),
+    ).resolves.toEqual({
+      baselineReviewId: "matching-host",
+      checkpoint: [{ location: "changed.ts", content: "follow-up" }],
+      files: [{ location: "changed.ts", oldContent: "reviewed", newContent: "follow-up" }],
+    });
+    expect(readCurrentContent).toHaveBeenCalledWith("changed.ts");
+  });
 });
 
 async function writePayload(
@@ -226,6 +261,7 @@ async function writePayload(
     checkpoint?: ReviewPayload["checkpoint"];
     status?: ReviewStatus;
     sessionId?: string;
+    sourceKey?: string;
   },
 ) {
   const appDir = join(root, ".lgtm", params.reviewId);
@@ -241,6 +277,14 @@ async function writePayload(
     reviewPath: join(appDir, "review.json"),
     generatedAt: params.generatedAt,
     checkpoint: params.checkpoint,
+    source: params.sourceKey
+      ? {
+          kind: "git",
+          transport: "ssh",
+          key: params.sourceKey,
+          label: "host:/repo",
+        }
+      : undefined,
     files: [
       {
         id: "file-0",
@@ -270,6 +314,7 @@ async function writePayload(
     files: payload.files.map(function createReviewFile(file) {
       return { location: file.location, added: file.added, removed: file.removed, comments: [] };
     }),
+    source: payload.source,
     documentComments: [],
   };
   await writeFile(join(appDir, "review.json"), JSON.stringify(review), "utf8");

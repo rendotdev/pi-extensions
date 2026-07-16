@@ -37,9 +37,9 @@ const review = {
 
 function dependencies(): McpRuntimeDependencies {
   return {
-    collectGitReviewFiles: vi.fn(async () => [
-      { location: "file.ts", oldContent: "old", newContent: "new" },
-    ]),
+    collectGitReview: vi.fn(async () => ({
+      files: [{ location: "file.ts", oldContent: "old", newContent: "new" }],
+    })),
     finishReview: vi.fn(async () => ({ found: false as const })),
     openReview: vi.fn(async () => pointer),
     stopReview: vi.fn(async () => true),
@@ -83,8 +83,47 @@ describe("LGTM MCP tools", () => {
       expect.objectContaining({ required: ["reviewPath"] }),
     );
     expect(mcpTools.find((tool) => tool.name === "open_git_review")?.inputSchema).toEqual(
-      expect.objectContaining({ required: ["name"] }),
+      expect.objectContaining({
+        required: ["name"],
+        properties: expect.objectContaining({
+          groups: expect.objectContaining({ minItems: 1 }),
+        }),
+      }),
     );
+  });
+
+  it("passes title-and-file groups to Git reviews", async () => {
+    const runtime = dependencies();
+    const handle = createMcpToolHandler(runtime);
+    const groups = [{ title: "Runtime", files: ["file.ts"] }];
+
+    await handle(
+      "open_git_review",
+      { cwd: "/tmp/project", name: "Grouped changes", groups },
+      new AbortController().signal,
+    );
+
+    expect(runtime.openReview).toHaveBeenCalledWith(
+      expect.objectContaining({ groups }),
+      expect.anything(),
+    );
+  });
+
+  it("rejects unsupported group metadata", async () => {
+    const runtime = dependencies();
+    const handle = createMcpToolHandler(runtime);
+
+    await expect(
+      handle(
+        "open_git_review",
+        {
+          cwd: "/tmp/project",
+          name: "Grouped changes",
+          groups: [{ title: "Runtime", summary: "Not supported", files: ["file.ts"] }],
+        },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow("unsupported fields: summary");
   });
 
   it("keeps an open Git tool call pending through waitForReview and returns the decision", async () => {
@@ -97,7 +136,9 @@ describe("LGTM MCP tools", () => {
       controller.signal,
     );
 
-    expect(runtime.collectGitReviewFiles).toHaveBeenCalledWith("/tmp/project", controller.signal);
+    expect(runtime.collectGitReview).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: "/tmp/project", signal: controller.signal }),
+    );
     expect(runtime.openReview).toHaveBeenCalledWith(
       {
         kind: "diff",
@@ -115,6 +156,47 @@ describe("LGTM MCP tools", () => {
       signal: expect.any(AbortSignal),
     });
     expect(result).toEqual(expect.objectContaining({ status: "changes_requested" }));
+  });
+
+  it("passes remote Git arguments and source metadata through the existing tool", async () => {
+    const runtime = dependencies();
+    runtime.collectGitReview = vi.fn(async () => ({
+      files: [{ location: "remote.ts", oldContent: "old", newContent: "new" }],
+      source: {
+        kind: "git" as const,
+        transport: "ssh" as const,
+        key: "ssh://ren@host:22/repo",
+        label: "devbox:/repo",
+      },
+    }));
+    const handle = createMcpToolHandler(runtime);
+
+    await handle(
+      "open_git_review",
+      {
+        cwd: "/tmp/project",
+        name: "Remote changes",
+        remote: "devbox",
+        remoteCwd: "/repo",
+        sinceLast: true,
+      },
+      new AbortController().signal,
+    );
+
+    expect(runtime.collectGitReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: "/tmp/project",
+        remote: "devbox",
+        remoteCwd: "/repo",
+        sinceLast: true,
+      }),
+    );
+    expect(runtime.openReview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: expect.objectContaining({ transport: "ssh" }),
+      }),
+      expect.anything(),
+    );
   });
 
   it("opens JSON and document reviews without a host-specific adapter", async () => {

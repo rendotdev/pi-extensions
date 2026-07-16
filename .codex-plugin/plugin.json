@@ -15,14 +15,14 @@
   "interface": {
     "displayName": "LGTM",
     "shortDescription": "Review agent work with human approval",
-    "longDescription": "Open a local browser checkpoint to review code changes or Markdown, leave contextual comments, and approve agent work.",
+    "longDescription": "Open a local browser checkpoint to review local or SSH-hosted code changes and Markdown, leave contextual comments, and approve agent work.",
     "developerName": "rendotdev",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],
     "websiteURL": "https://github.com/rendotdev/lgtm",
     "defaultPrompt": [
-      "Use LGTM to present this work for human review.",
-      "Open an LGTM review for the current Git changes."
+      "Use lgtm to present this work for human review.",
+      "Open an lgtm review for the current local or SSH-hosted Git changes."
     ],
     "brandColor": "#16A34A"
   }

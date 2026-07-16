@@ -206,7 +206,8 @@ export class FileSearchClass extends DomainClass<{}, {}> {
       if (matchIndex === previousMatch + 1) {
         adjacencyBonus += 28;
       }
-      if (matchIndex === 0 || this.isSeparator(candidate[matchIndex - 1] ?? "")) {
+      const isBoundaryMatch = matchIndex === 0 || this.isSeparator(candidate[matchIndex - 1] ?? "");
+      if (isBoundaryMatch) {
         boundaryBonus += 36;
       }
       previousMatch = matchIndex;
@@ -220,10 +221,10 @@ export class FileSearchClass extends DomainClass<{}, {}> {
   }
 
   private scoreEditDistance(term: SearchTerm, candidate: string): number | null {
-    if (
+    const isOutsideDistanceRange =
       term.maximumDistance === 0 ||
-      Math.abs(term.value.length - candidate.length) > term.maximumDistance
-    ) {
+      Math.abs(term.value.length - candidate.length) > term.maximumDistance;
+    if (isOutsideDistanceRange) {
       return null;
     }
     const distance = this.damerauLevenshtein(term, candidate);
@@ -244,26 +245,26 @@ export class FileSearchClass extends DomainClass<{}, {}> {
         const substitutionCost =
           term.value[queryIndex - 1] === candidate[candidateIndex - 1] ? 0 : 1;
         current[candidateIndex] = Math.min(
-          previous[candidateIndex]! + 1,
-          current[candidateIndex - 1]! + 1,
-          previous[candidateIndex - 1]! + substitutionCost,
+          previous[candidateIndex] + 1,
+          current[candidateIndex - 1] + 1,
+          previous[candidateIndex - 1] + substitutionCost,
         );
-        if (
+        const isTransposition =
           queryIndex > 1 &&
           candidateIndex > 1 &&
           term.value[queryIndex - 1] === candidate[candidateIndex - 2] &&
-          term.value[queryIndex - 2] === candidate[candidateIndex - 1]
-        ) {
+          term.value[queryIndex - 2] === candidate[candidateIndex - 1];
+        if (isTransposition) {
           current[candidateIndex] = Math.min(
-            current[candidateIndex]!,
-            previousPrevious[candidateIndex - 2]! + 1,
+            current[candidateIndex],
+            previousPrevious[candidateIndex - 2] + 1,
           );
         }
       }
       [previousPrevious, previous, current] = [previous, current, previousPrevious];
     }
 
-    return previous[candidate.length]!;
+    return previous[candidate.length];
   }
 
   private isSeparator(value: string): boolean {

@@ -6,6 +6,23 @@ export type DiffReviewFileInput = {
   newContent: string;
 };
 
+export type ReviewGroupInput = {
+  title: string;
+  files: string[];
+};
+
+export type ReviewGroup = {
+  title: string;
+  files: string[];
+};
+
+export type GitReviewSource = {
+  kind: "git";
+  transport: "ssh";
+  key: string;
+  label: string;
+};
+
 export type ReviewPointer = {
   name: string;
   sessionId: string;
@@ -94,6 +111,7 @@ export type ReviewJson = {
   updatedAt: string;
   finishedAt?: string;
   files: ReviewFile[];
+  source?: GitReviewSource;
   document?: DocumentSource;
   documentComments: DocumentComment[];
 };
@@ -109,7 +127,9 @@ export type ReviewPayload = {
   reviewPath: string;
   generatedAt: string;
   files: ReviewSourceFile[];
+  groups?: ReviewGroup[];
   checkpoint?: ReviewCheckpointFile[];
+  source?: GitReviewSource;
   document?: DocumentSource;
 };
 
@@ -122,7 +142,9 @@ export type OpenReviewInput = {
   kind: "diff" | "document";
   name: string;
   files?: DiffReviewFileInput[];
+  groups?: ReviewGroupInput[];
   checkpoint?: ReviewCheckpointFile[];
+  source?: GitReviewSource;
   document?: DocumentSource;
 };
 
@@ -272,6 +294,7 @@ export class ReviewBuilderClass extends DomainClass<{}, {}> {
         removed: file.removed,
         comments: existingByLocation.get(file.location)?.comments ?? [],
       })),
+      source: params.source,
       document: params.document,
       documentComments: params.existingReview?.documentComments ?? [],
     };
@@ -362,7 +385,8 @@ export class ReviewFormatterClass extends DomainClass<{}, {}> {
   private formatLineRange(params: { comment: ReviewComment }) {
     const { comment } = params;
     const side = comment.side ? `${comment.side}, ` : "";
-    if (comment.startLine === null || comment.endLine === null) {
+    const isMissingLineRange = comment.startLine === null || comment.endLine === null;
+    if (isMissingLineRange) {
       return `${side}selected lines`;
     }
     if (comment.startLine === comment.endLine) {

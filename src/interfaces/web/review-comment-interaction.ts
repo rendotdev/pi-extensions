@@ -51,7 +51,9 @@ export class ReviewCommentInteractionClass extends DomainClass<
   public currentTextSelection(params: { root: ShadowRoot | HTMLElement }) {
     const selection = this.selectionFromRoot({ root: params.root });
     const selectedText = selection?.toString() ?? "";
-    if (!selection || !this.hasMeaningfulTextSelection({ selection, selectedText })) {
+    const isSelectionMissing =
+      !selection || !this.hasMeaningfulTextSelection({ selection, selectedText });
+    if (isSelectionMissing) {
       return null;
     }
     const range = selection.getRangeAt(0);

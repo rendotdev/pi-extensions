@@ -39,15 +39,19 @@ export class ReviewGarbageCollectorClass extends DomainClass<
       const entries = await readdir(root, { withFileTypes: true });
 
       for (const entry of entries) {
-        if (!entry.isDirectory() || entry.name === cleanupLockName) {
+        const shouldSkipEntry = !entry.isDirectory() || entry.name === cleanupLockName;
+        if (shouldSkipEntry) {
           continue;
         }
         const appDir = resolve(root, entry.name);
-        if (!appDir.startsWith(`${root}${sep}`) || appDir === excludeAppDir) {
+        const shouldSkipDirectory = !appDir.startsWith(`${root}${sep}`) || appDir === excludeAppDir;
+        if (shouldSkipDirectory) {
           continue;
         }
         const expiresAt = await this.readExpiresAt({ appDir });
-        if (!expiresAt || !this.deps.retentionPolicy.isExpired({ expiresAt, now })) {
+        const shouldKeepReview =
+          !expiresAt || !this.deps.retentionPolicy.isExpired({ expiresAt, now });
+        if (shouldKeepReview) {
           continue;
         }
 

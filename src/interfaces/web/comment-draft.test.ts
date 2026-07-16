@@ -6,7 +6,7 @@ describe("CommentDraftClass", () => {
     const onDelete = vi.fn();
     const onFinish = vi.fn();
 
-    new CommentDraftClass({}, {}).finish(value, { onDelete, onFinish });
+    new CommentDraftClass({}, {}).finish({ value, onDelete, onFinish });
 
     expect(onDelete).toHaveBeenCalledOnce();
     expect(onFinish).not.toHaveBeenCalled();
@@ -16,7 +16,11 @@ describe("CommentDraftClass", () => {
     const onDelete = vi.fn();
     const onFinish = vi.fn();
 
-    new CommentDraftClass({}, {}).finish("  Keep this comment.  ", { onDelete, onFinish });
+    new CommentDraftClass({}, {}).finish({
+      value: "  Keep this comment.  ",
+      onDelete,
+      onFinish,
+    });
 
     expect(onDelete).not.toHaveBeenCalled();
     expect(onFinish).toHaveBeenCalledExactlyOnceWith("  Keep this comment.  ");

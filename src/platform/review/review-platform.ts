@@ -21,6 +21,7 @@ import {
   type ReviewPayload,
   type ReviewPointer,
 } from "../../domain/review/review.ts";
+import { ReviewGrouping } from "../../domain/review/review-grouping.ts";
 import { LgtmPreferencesPlatformClass } from "../preferences/preferences-platform.ts";
 import { ReviewExpirationSchedulerClass } from "./review-expiration-scheduler.ts";
 import { ReviewGarbageCollectorClass } from "./review-garbage-collector.ts";
@@ -76,7 +77,7 @@ class ReviewServerLifecycleClass extends DomainClass<
     stopReviewServerState: (state: ReviewServerState, reviewPath?: string) => Promise<boolean>;
   }
 > {
-  constructor(
+  public constructor(
     params: Record<string, never>,
     deps: {
       activeReviewServersByPath: Map<string, ReviewServerState>;
@@ -229,6 +230,7 @@ export async function openReview(
   const files = (input.files ?? []).map((file, index) =>
     ReviewSourceBuilder.build({ file, index }),
   );
+  const groups = ReviewGrouping.build({ files, groups: input.groups });
 
   if (options.replaceActiveReview === true) {
     options.onUpdate?.("Stopping any previous LGTM review server...");
@@ -247,6 +249,7 @@ export async function openReview(
     reviewPath,
     generatedAt,
     files,
+    source: input.source,
     document: input.document,
   });
   const payload: ReviewPayload = {
@@ -260,7 +263,9 @@ export async function openReview(
     reviewPath,
     generatedAt,
     files,
+    groups,
     checkpoint: input.checkpoint,
+    source: input.source,
     document: input.document,
   };
   await writeReviewApp(appDir, payload, review, manifest);
@@ -285,15 +290,15 @@ export async function openReview(
     if (options.trackAsActiveReview !== false) {
       activeReviewServersByPath.set(reviewPath, serverState);
     }
-    if (options.signal && options.trackAsActiveReview !== false) {
+    const signal = options.signal;
+    const shouldTrackAbort = signal && options.trackAsActiveReview !== false;
+    if (shouldTrackAbort) {
       function abort() {
         void stopReview(cwd, reviewPath);
       }
-      options.signal.addEventListener("abort", abort, { once: true });
-      abortCleanupByReviewPath.set(reviewPath, () =>
-        options.signal?.removeEventListener("abort", abort),
-      );
-      if (options.signal.aborted) {
+      signal.addEventListener("abort", abort, { once: true });
+      abortCleanupByReviewPath.set(reviewPath, () => signal.removeEventListener("abort", abort));
+      if (signal.aborted) {
         abort();
       }
     }
@@ -404,7 +409,8 @@ export async function collectGitReviewFiles(
     const oldContent =
       hasHead && change.oldPath ? await readGitFile(root, change.oldPath, signal) : "";
     const newContent = change.newPath ? await readWorkingTreeFile(root, change.newPath) : "";
-    if (oldContent.includes("\0") || newContent.includes("\0")) {
+    const isBinaryFile = oldContent.includes("\0") || newContent.includes("\0");
+    if (isBinaryFile) {
       continue;
     }
     files.push({
@@ -414,7 +420,8 @@ export async function collectGitReviewFiles(
     });
   }
 
-  if (files.length === 0 && options.allowEmpty !== true) {
+  const hasNoReviewableFiles = files.length === 0 && options.allowEmpty !== true;
+  if (hasNoReviewableFiles) {
     throw new Error("No text changes were found to review.");
   }
   return files;
@@ -462,7 +469,8 @@ function parseGitNameStatus(output: string): Array<{ oldPath?: string; newPath?:
     }
 
     const kind = status.charAt(0);
-    if (kind === "R" || kind === "C") {
+    const isRenameOrCopy = kind === "R" || kind === "C";
+    if (isRenameOrCopy) {
       const newPath = fields[index + 1] ?? "";
       index += 1;
       changes.push({ oldPath: path, newPath });
@@ -679,7 +687,8 @@ export async function serveReviewApp(appDirInput: string): Promise<void> {
     server.once("error", rejectPromise);
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
-      if (!address || typeof address === "string") {
+      const isInvalidAddress = !address || typeof address === "string";
+      if (isInvalidAddress) {
         rejectPromise(new Error("LGTM review server did not receive a TCP port."));
         return;
       }
@@ -727,7 +736,8 @@ function sendJson(response: ServerResponse, status: number, value: unknown) {
 async function sendStaticFile(response: ServerResponse, webRoot: string, pathname: string) {
   const relativePath = pathname === "/" ? "index.html" : decodeURIComponent(pathname.slice(1));
   const filePath = resolve(webRoot, relativePath);
-  if (filePath !== webRoot && !filePath.startsWith(`${webRoot}${sep}`)) {
+  const isOutsideWebRoot = filePath !== webRoot && !filePath.startsWith(`${webRoot}${sep}`);
+  if (isOutsideWebRoot) {
     return sendJson(response, 404, { error: "Not found." });
   }
 
@@ -766,11 +776,11 @@ async function readReviewServerState(appDir: string): Promise<ReviewServerState 
     const state = JSON.parse(
       await readFile(join(appDir, "server.json"), "utf8"),
     ) as ReviewServerState;
-    if (
+    const isValidState =
       Number.isInteger(state.pid) &&
       typeof state.appDir === "string" &&
-      resolve(state.appDir) === resolve(appDir)
-    ) {
+      resolve(state.appDir) === resolve(appDir);
+    if (isValidState) {
       return state;
     }
   } catch {
@@ -1064,7 +1074,8 @@ export async function waitForReview(
   options: WaitForReviewOptions,
 ): Promise<CompletedReview> {
   const pollIntervalMs = options.pollIntervalMs ?? 250;
-  if (!Number.isFinite(pollIntervalMs) || pollIntervalMs < 10) {
+  const isInvalidPollInterval = !Number.isFinite(pollIntervalMs) || pollIntervalMs < 10;
+  if (isInvalidPollInterval) {
     throw new Error("pollIntervalMs must be at least 10 milliseconds.");
   }
 
@@ -1072,7 +1083,8 @@ export async function waitForReview(
     while (true) {
       throwIfAborted(options.signal);
       const review = await readReviewIfExists(pointer.reviewPath);
-      if (review && review.status !== "open") {
+      const isReviewComplete = review && review.status !== "open";
+      if (isReviewComplete) {
         stopReviewFinishWatcher(pointer.reviewPath);
         const stoppedServer =
           options.stopServer === false
@@ -1088,7 +1100,8 @@ export async function waitForReview(
       await abortableDelay(pollIntervalMs, options.signal);
     }
   } catch (error) {
-    if (options.signal?.aborted && options.stopServer !== false) {
+    const shouldStopAbortedReview = options.signal?.aborted && options.stopServer !== false;
+    if (shouldStopAbortedReview) {
       await stopReview(options.cwd, pointer.reviewPath).catch(() => false);
     }
     throw error;

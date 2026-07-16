@@ -32,7 +32,8 @@ export function buildUseReviewServerMonitor(
         isChecking = true;
         try {
           const response = await fetchHealth("/health", { cache: "no-store" });
-          if (!response.ok && latestGetCommentCountRef.current() === 0) {
+          const shouldCloseWindow = !response.ok && latestGetCommentCountRef.current() === 0;
+          if (shouldCloseWindow) {
             deps.closeWindow();
           }
         } catch {

@@ -14,7 +14,9 @@ const packageJson = await readJson("package.json");
 const packageName = packageJson.name;
 const packageVersion = packageJson.version;
 
-if (typeof packageName !== "string" || typeof packageVersion !== "string") {
+const isInvalidPackageIdentity =
+  typeof packageName !== "string" || typeof packageVersion !== "string";
+if (isInvalidPackageIdentity) {
   throw new Error("package.json must define string name and version fields.");
 }
 
@@ -61,7 +63,8 @@ for (const entry of updates) {
   }
 }
 
-if (checkOnly && changed.length > 0) {
+const isCheckOutOfSync = checkOnly && changed.length > 0;
+if (isCheckOutOfSync) {
   throw new Error(
     `Plugin metadata is out of sync: ${changed.join(", ")}. Run bun run metadata:sync.`,
   );
@@ -80,11 +83,13 @@ function updateNpmMarketplace(
   includeEntryVersion: boolean,
 ) {
   const plugin = findLgtmMarketplacePlugin(json);
-  if (!isJsonObject(plugin.source) || plugin.source.source !== "npm") {
+  const source = plugin.source;
+  const isInvalidSource = !isJsonObject(source) || source.source !== "npm";
+  if (isInvalidSource) {
     throw new Error("LGTM marketplace source must use npm.");
   }
-  plugin.source.package = expectedPackage;
-  plugin.source.version = expectedVersion;
+  source.package = expectedPackage;
+  source.version = expectedVersion;
   if (includeEntryVersion) {
     plugin.version = expectedVersion;
   }

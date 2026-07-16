@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { JsonReviewInputParser } from "./json-review-input.ts";
+import { JsonReviewInputParser, ReviewGroupsInputParser } from "./json-review-input.ts";
 
 const file = {
   location: "src/example.ts",
@@ -9,11 +9,12 @@ const file = {
 
 describe("JsonReviewInputParserClass", () => {
   it("parses the documented review object", () => {
+    const groups = [{ title: "Runtime", files: [file.location] }];
     expect(
       JsonReviewInputParser.parse({
-        value: { name: "Example review", files: [file] },
+        value: { name: "Example review", files: [file], groups },
       }),
-    ).toEqual({ name: "Example review", files: [file] });
+    ).toEqual({ name: "Example review", files: [file], groups });
   });
 
   it("parses the shorthand file array", () => {
@@ -32,5 +33,31 @@ describe("JsonReviewInputParserClass", () => {
         value: { files: [{ ...file, newContent: 42 }] },
       }),
     ).toThrow("files[0].newContent");
+  });
+});
+
+describe("ReviewGroupsInputParserClass", () => {
+  it("parses a groups manifest", () => {
+    expect(
+      ReviewGroupsInputParser.parse({
+        value: { groups: [{ title: "Tests", files: ["src/example.test.ts"] }] },
+      }),
+    ).toEqual([{ title: "Tests", files: ["src/example.test.ts"] }]);
+  });
+
+  it("rejects group metadata beyond a title and files", () => {
+    expect(() =>
+      ReviewGroupsInputParser.parse({
+        value: {
+          groups: [{ title: "Tests", summary: "Not supported", files: ["example.test.ts"] }],
+        },
+      }),
+    ).toThrow("Invalid review groups input");
+  });
+
+  it("rejects empty groups", () => {
+    expect(() => ReviewGroupsInputParser.parse({ value: { groups: [] } })).toThrow(
+      "Review grouping requires at least one group.",
+    );
   });
 });

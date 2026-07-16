@@ -74,7 +74,8 @@ export class ReviewHandoffClass extends DomainClass<{}, {}> {
     if (startLine === null) {
       return "";
     }
-    if (endLine === null || endLine === startLine) {
+    const isSingleLine = endLine === null || endLine === startLine;
+    if (isSingleLine) {
       return `:${startLine}`;
     }
     return `:${startLine}-${endLine}`;

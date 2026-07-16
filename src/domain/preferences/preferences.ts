@@ -22,10 +22,12 @@ export class LgtmPreferencesClass extends DomainClass<{}, {}> {
   };
 
   public parse(params: { value: unknown }): LgtmPreferences {
-    if (params.value === undefined || params.value === null) {
+    const isMissingValue = params.value === undefined || params.value === null;
+    if (isMissingValue) {
       return { ...this.defaults };
     }
-    if (typeof params.value !== "object" || Array.isArray(params.value)) {
+    const isInvalidValue = typeof params.value !== "object" || Array.isArray(params.value);
+    if (isInvalidValue) {
       throw new Error("LGTM preferences must be an object.");
     }
 
@@ -37,7 +39,8 @@ export class LgtmPreferencesClass extends DomainClass<{}, {}> {
       fileExpansionOverrides?: unknown;
     };
     const diffStyle = preferences.diffStyle ?? this.defaults.diffStyle;
-    if (diffStyle !== "unified" && diffStyle !== "split") {
+    const isInvalidDiffStyle = diffStyle !== "unified" && diffStyle !== "split";
+    if (isInvalidDiffStyle) {
       throw new Error('diffStyle must be "unified" or "split".');
     }
     const lineWrap = preferences.lineWrap ?? this.defaults.lineWrap;
@@ -45,30 +48,33 @@ export class LgtmPreferencesClass extends DomainClass<{}, {}> {
       throw new Error("lineWrap must be a boolean.");
     }
     const sidebarWidth = preferences.sidebarWidth ?? this.defaults.sidebarWidth;
-    if (
+    const isInvalidSidebarWidth =
       typeof sidebarWidth !== "number" ||
       !Number.isInteger(sidebarWidth) ||
       sidebarWidth < 192 ||
-      sidebarWidth > 480
-    ) {
+      sidebarWidth > 480;
+    if (isInvalidSidebarWidth) {
       throw new Error("sidebarWidth must be an integer between 192 and 480.");
     }
     const fileExpansion = preferences.fileExpansion ?? this.defaults.fileExpansion;
-    if (fileExpansion !== "auto" && fileExpansion !== "expanded" && fileExpansion !== "collapsed") {
+    const isInvalidFileExpansion =
+      fileExpansion !== "auto" && fileExpansion !== "expanded" && fileExpansion !== "collapsed";
+    if (isInvalidFileExpansion) {
       throw new Error('fileExpansion must be "auto", "expanded", or "collapsed".');
     }
     const fileExpansionOverridesValue =
       preferences.fileExpansionOverrides ?? this.defaults.fileExpansionOverrides;
-    if (
+    const isInvalidFileExpansionOverrides =
       typeof fileExpansionOverridesValue !== "object" ||
       fileExpansionOverridesValue === null ||
-      Array.isArray(fileExpansionOverridesValue)
-    ) {
+      Array.isArray(fileExpansionOverridesValue);
+    if (isInvalidFileExpansionOverrides) {
       throw new Error("fileExpansionOverrides must be an object.");
     }
     const fileExpansionOverrides: Record<string, FileExpansionOverride> = {};
     for (const [location, override] of Object.entries(fileExpansionOverridesValue)) {
-      if (override !== "expanded" && override !== "collapsed") {
+      const isInvalidOverride = override !== "expanded" && override !== "collapsed";
+      if (isInvalidOverride) {
         throw new Error('fileExpansionOverrides values must be "expanded" or "collapsed".');
       }
       fileExpansionOverrides[location] = override;

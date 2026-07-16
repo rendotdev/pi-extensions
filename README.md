@@ -25,6 +25,24 @@ Open the current working tree:
 lgtm review --name "Review current changes"
 ```
 
+Arrange larger reviews into conceptual file groups authored by the agent:
+
+```bash
+lgtm review --name "Review current changes" --groups /tmp/lgtm-groups.json
+```
+
+```json
+{
+  "groups": [
+    { "title": "Runtime", "files": ["src/runtime.ts"] },
+    { "title": "Tests", "files": ["src/runtime.test.ts"] }
+  ]
+}
+```
+
+Group and file order are preserved. Changed files omitted from the manifest remain visible under
+**Other changes**.
+
 `lgtm review git --name "Review current changes"` is the equivalent explicit command.
 
 After handling feedback, review only what has changed since the latest compatible completed LGTM diff review:
@@ -35,13 +53,38 @@ lgtm review --since-last --name "Review follow-up changes"
 
 The earlier review's retained payload becomes the baseline. LGTM neither changes Git nor adds a marker. Open and canceled reviews are ignored; without a compatible completed review, LGTM falls back to a normal Git diff.
 
+## Review a repository over SSH
+
+Read a working tree from another machine and open the review in the local browser:
+
+```bash
+lgtm review git \
+  --remote build-mac \
+  --remote-cwd /Users/ren/project \
+  --name "Review build-mac changes"
+```
+
+`--remote` accepts an OpenSSH destination, including an alias from `~/.ssh/config`, `user@host`, or `ssh://user@host:port`. `--remote-cwd` is the absolute repository path on that machine. Remote linked worktrees use the same reader:
+
+```bash
+lgtm review worktree /Users/ren/project-feature \
+  --remote build-mac \
+  --name "Review remote feature worktree"
+```
+
+The remote machine needs SSH, Git, and standard POSIX shell utilities. It does not need lgtm, Node, a browser, an exposed port, or writable temporary storage. lgtm runs read-only Git and file commands remotely; the review server, comments, checkpoints, preferences, and decisions stay local.
+
+lgtm uses the system `ssh` executable and inherits SSH aliases, keys, agents, Keychain integration, `SSH_AUTH_SOCK`, `ProxyJump`, and host-key policy. Configure credentials in OpenSSH, then confirm `ssh build-mac true` succeeds before opening the review. Remote `--since-last` baselines match the resolved SSH user, host, port, and Git root.
+
+The bundled MCP `open_git_review` tool accepts `remote`, `remoteCwd`, and `sinceLast`. Its `open_worktree_review` tool accepts `remote` with a remote absolute `path`. Pi's native Git and worktree review tools expose the same fields. Codex, Claude Code, and Pi run SSH locally and return the normal browser decision through their existing review lifecycle.
+
 ## Features
 
 - **Unified and side-by-side diffs.** Choose the view that makes a change easiest to assess.
 - **Line wrap.** Keep long lines readable without horizontal scrolling.
 - **Virtualized rendering.** Keep large reviews responsive while you move between files.
 - **Saved preferences.** LGTM stores your chosen layout, line wrapping, sidebar width, and file expansion in `.lgtm/lgtm.jsonc` at the project root.
-- **Independent reviews.** Each review has its own server and directory, so reviews for multiple repositories, worktrees, or checkpoints can stay open at once.
+- **Independent reviews.** Each review has its own server and directory, so reviews for multiple repositories, local or remote worktrees, and checkpoints can stay open at once.
 
 ## Work through a review
 
@@ -66,6 +109,7 @@ A JSON review supplies the before and after content directly:
 ```json
 {
   "name": "Review generated changes",
+  "groups": [{ "title": "Runtime", "files": ["src/example.ts"] }],
   "files": [
     {
       "location": "src/example.ts",

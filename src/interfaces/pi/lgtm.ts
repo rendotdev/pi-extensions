@@ -7,12 +7,12 @@ import {
 import { resolve } from "node:path";
 import { DomainClass } from "../../domain/domain-class.ts";
 import {
-  collectGitReviewFiles,
   finishReview,
   openReview,
   stopReviews,
   type OpenReviewOptions,
 } from "../../platform/review/review-platform.ts";
+import { GitReviewCommand } from "../../platform/review/git-review-command.ts";
 import type { OpenReviewInput } from "../../domain/review/review.ts";
 
 const fileInputSchema = Type.Object({
@@ -21,8 +21,19 @@ const fileInputSchema = Type.Object({
   newContent: Type.String({ description: "Updated file content after the change." }),
 });
 
+const groupInputSchema = Type.Object(
+  {
+    title: Type.String({ description: "Short conceptual group title." }),
+    files: Type.Array(Type.String(), {
+      minItems: 1,
+      description: "Changed file paths in review order.",
+    }),
+  },
+  { additionalProperties: false },
+);
+
 type LgtmPiExtensionDependencies = {
-  collectGitReviewFiles: typeof collectGitReviewFiles;
+  collectGitReview: typeof GitReviewCommand.collect;
   finishReview: typeof finishReview;
   openReview: typeof openReview;
   resolvePath: typeof resolve;
@@ -30,7 +41,8 @@ type LgtmPiExtensionDependencies = {
 };
 
 export class LgtmPiExtensionClass extends DomainClass<{}, LgtmPiExtensionDependencies> {
-  public register(pi: ExtensionAPI) {
+  public register(params: { pi: ExtensionAPI }) {
+    const pi = params.pi;
     pi.registerTool(this.createOpenGitReviewTool(pi));
     pi.registerTool(this.createOpenWorktreeReviewTool(pi));
     pi.registerTool(this.createOpenJsonReviewTool(pi));
@@ -107,22 +119,51 @@ export class LgtmPiExtensionClass extends DomainClass<{}, LgtmPiExtensionDepende
       name: "lgtm-open-git-review",
       label: "Open Git Review",
       description:
-        "Open an LGTM browser review for current staged, unstaged, and untracked text changes compared with HEAD.",
+        "Open an lgtm browser review for local or SSH-hosted staged, unstaged, and untracked text changes compared with HEAD.",
       promptSnippet:
         "lgtm-open-git-review: Present current Git changes for human review and approval.",
       promptGuidelines: [
-        "Use lgtm-open-git-review only after the current checkout changes are ready and validated. Provide a concise, task-specific name and wait for its automatic review follow-up before continuing.",
+        "Use lgtm-open-git-review only after the local or SSH-hosted checkout changes are ready and validated. For SSH, provide remote and an absolute remoteCwd. Provide a concise, task-specific name and wait for its automatic review follow-up before continuing.",
       ],
       executionMode: "sequential",
       parameters: Type.Object({
         name: Type.String({ description: "Concise, task-specific review name." }),
+        remote: Type.Optional(
+          Type.String({ description: "Optional OpenSSH destination or SSH config alias." }),
+        ),
+        remoteCwd: Type.Optional(
+          Type.String({
+            description: "Absolute repository path on the remote machine. Required with remote.",
+          }),
+        ),
+        sinceLast: Type.Optional(
+          Type.Boolean({
+            description: "Review only changes since the newest compatible completed review.",
+          }),
+        ),
+        groups: Type.Optional(
+          Type.Array(groupInputSchema, {
+            minItems: 1,
+            description: "Conceptual file groups in review order.",
+          }),
+        ),
       }),
       execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
-        const files = await this.deps.collectGitReviewFiles(ctx.cwd, signal);
+        const collection = await this.deps.collectGitReview({
+          cwd: ctx.cwd,
+          remote: params.remote,
+          remoteCwd: params.remoteCwd,
+          sessionId: ctx.sessionManager.getSessionId() || undefined,
+          signal,
+          sinceLast: params.sinceLast,
+        });
         return this.openFromPi(pi, ctx, signal, {
           kind: "diff",
           name: params.name,
-          files,
+          files: collection.files,
+          groups: params.groups,
+          checkpoint: collection.checkpoint,
+          source: collection.source,
         });
       },
     });
@@ -132,31 +173,44 @@ export class LgtmPiExtensionClass extends DomainClass<{}, LgtmPiExtensionDepende
     return defineTool({
       name: "lgtm-open-worktree-review",
       label: "Open Worktree Review",
-      description: "Open an LGTM browser review for changes in another Git worktree.",
+      description: "Open an lgtm browser review for changes in a local or SSH-hosted Git worktree.",
       promptSnippet:
         "lgtm-open-worktree-review: Present another Git worktree for human review and approval.",
       promptGuidelines: [
-        "Use lgtm-open-worktree-review for a distinct worktree path; wait for its automatic review follow-up before continuing.",
+        "Use lgtm-open-worktree-review for a distinct local worktree path, or provide remote with an absolute remote worktree path; wait for its automatic review follow-up before continuing.",
       ],
       executionMode: "sequential",
       parameters: Type.Object({
         worktree: Type.String({
           description:
-            "Absolute path, or path relative to the current working directory, of the worktree.",
+            "Local worktree path, or an absolute remote worktree path when remote is provided.",
         }),
         name: Type.Optional(
           Type.String({ description: "Review name. Defaults to Worktree review." }),
         ),
+        remote: Type.Optional(
+          Type.String({ description: "Optional OpenSSH destination or SSH config alias." }),
+        ),
+        groups: Type.Optional(
+          Type.Array(groupInputSchema, {
+            minItems: 1,
+            description: "Conceptual file groups in review order.",
+          }),
+        ),
       }),
       execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
-        const files = await this.deps.collectGitReviewFiles(
-          this.deps.resolvePath(ctx.cwd, params.worktree),
+        const collection = await this.deps.collectGitReview({
+          cwd: params.remote ? ctx.cwd : this.deps.resolvePath(ctx.cwd, params.worktree),
+          remote: params.remote,
+          remoteCwd: params.remote ? params.worktree : undefined,
           signal,
-        );
+        });
         return this.openFromPi(pi, ctx, signal, {
           kind: "diff",
           name: params.name ?? "Worktree review",
-          files,
+          files: collection.files,
+          groups: params.groups,
+          source: collection.source,
         });
       },
     });
@@ -176,6 +230,12 @@ export class LgtmPiExtensionClass extends DomainClass<{}, LgtmPiExtensionDepende
       executionMode: "sequential",
       parameters: Type.Object({
         name: Type.String({ description: "Review name." }),
+        groups: Type.Optional(
+          Type.Array(groupInputSchema, {
+            minItems: 1,
+            description: "Conceptual file groups in review order.",
+          }),
+        ),
         files: Type.Array(fileInputSchema, { minItems: 1, description: "Files to review." }),
       }),
       execute: async (_toolCallId, params, signal, _onUpdate, ctx) =>
@@ -183,6 +243,7 @@ export class LgtmPiExtensionClass extends DomainClass<{}, LgtmPiExtensionDepende
           kind: "diff",
           name: params.name,
           files: params.files,
+          groups: params.groups,
         }),
     });
   }
@@ -256,7 +317,7 @@ export class LgtmPiExtensionClass extends DomainClass<{}, LgtmPiExtensionDepende
 export const LgtmPiExtension = new LgtmPiExtensionClass(
   {},
   {
-    collectGitReviewFiles,
+    collectGitReview: GitReviewCommand.collect.bind(GitReviewCommand),
     finishReview,
     openReview,
     resolvePath: resolve,
@@ -264,4 +325,6 @@ export const LgtmPiExtension = new LgtmPiExtensionClass(
   },
 );
 
-export default LgtmPiExtension.register.bind(LgtmPiExtension);
+export default function registerLgtmPiExtension(pi: ExtensionAPI) {
+  return LgtmPiExtension.register({ pi });
+}

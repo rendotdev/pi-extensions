@@ -3,14 +3,13 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
-  collectGitReviewFiles,
-  collectGitReviewFilesSinceLast,
   finishReview,
   openReview,
   ReviewIdentifier,
   serveReviewApp,
   stopReviews,
 } from "../../platform/review/review-platform.ts";
+import { GitReviewCommand } from "../../platform/review/git-review-command.ts";
 import type { ReviewPointer } from "../../domain/review/review.ts";
 import {
   AgentInstallPlanner,
@@ -20,8 +19,9 @@ import {
 import { AgentInstaller, AgentUpdater } from "../../platform/install/agent-install-platform.ts";
 import { CliUpdater } from "../../platform/install/cli-update-platform.ts";
 import { runMcpServer } from "../mcp/mcp.ts";
-import { JsonReviewInputParser } from "./json-review-input.ts";
-import { CommandUiRenderer, type CommandUiReporter } from "./command-ui.tsx";
+import { JsonReviewInputParser, ReviewGroupsInputParser } from "./json-review-input.ts";
+import { CliCommandRunnerClass } from "./cli-command-runner.ts";
+import { CommandUiRenderer } from "./command-ui.tsx";
 
 const args = process.argv.slice(2);
 if (args[0] === "--") {
@@ -42,6 +42,18 @@ const reviewSessionId = configuredReviewSessionId
 const cancellation = new AbortController();
 let cancelling = false;
 let commandErrorRendered = false;
+const CliCommandRunner = new CliCommandRunnerClass(
+  { jsonOutput },
+  {
+    markErrorRendered: function markErrorRendered() {
+      commandErrorRendered = true;
+    },
+    renderer: CommandUiRenderer,
+    writeJson: function writeJson(value) {
+      console.log(JSON.stringify(value, null, 2));
+    },
+  },
+);
 
 async function cancel() {
   if (cancelling) {
@@ -74,7 +86,8 @@ function takeOption(option: string) {
     return undefined;
   }
   const value = args[index + 1];
-  if (!value || value.startsWith("--")) {
+  const isMissingValue = !value || value.startsWith("--");
+  if (isMissingValue) {
     throw new Error(`${option} requires a value.`);
   }
   args.splice(index, 2);
@@ -116,8 +129,8 @@ function helpText() {
   return `lgtm, human approval for agent work
 
 Usage:
-  lgtm review [git] --name <name> [--since-last] [--cwd <path>] [--json]
-  lgtm review worktree <path> [--name <name>] [--cwd <path>] [--json]
+  lgtm review [git] --name <name> [--groups <groups.json>] [--since-last] [--remote <ssh-destination> --remote-cwd <absolute-path>] [--cwd <path>] [--json]
+  lgtm review worktree <path> [--groups <groups.json>] [--remote <ssh-destination>] [--name <name>] [--cwd <path>] [--json]
   lgtm review json [review.json] [--name <name>] [--cwd <path>] [--json]
   lgtm review document [markdown-file] [--name <name>] [--cwd <path>] [--json]
   lgtm review result --review-path <path> [--cwd <path>] [--json]
@@ -128,31 +141,24 @@ Usage:
 JSON review schema:
   {
     "name": "Review name",
+    "groups": [
+      { "title": "Runtime", "files": ["file.ts"] }
+    ],
     "files": [
       { "location": "file.ts", "oldContent": "before", "newContent": "after" }
     ]
   }
 
-Run \`lgtm review --name "Review current changes"\` to review current Git changes. Add \`--since-last\` to show only changes made after the most recent compatible lgtm diff review with an approved or changes-requested outcome. Document Markdown and review JSON are read from stdin when no file is supplied. Review outcomes are \`approved\`, \`changes_requested\`, or \`canceled\`.`;
+Run \`lgtm review --name "Review current changes"\` to review current Git changes. Add \`--groups <groups.json>\` to arrange changed files into authored groups; unassigned files remain visible under Other changes. Add \`--remote <ssh-destination> --remote-cwd <absolute-path>\` to read a repository from another machine through the system SSH configuration. Add \`--since-last\` to show only changes made after the most recent compatible lgtm diff review with an approved or changes-requested outcome. Document Markdown and review JSON are read from stdin when no file is supplied. Review outcomes are \`approved\`, \`changes_requested\`, or \`canceled\`.`;
 }
 
-async function runCommand<Result>(params: {
-  label: string;
-  successLabel?: string;
-  execute: (report: CommandUiReporter) => Promise<Result>;
-  renderSuccess: (result: Result) => string;
-}): Promise<Result> {
-  if (jsonOutput) {
-    const result = await params.execute(CommandUiRenderer.createSilentReporter());
-    console.log(JSON.stringify(result, null, 2));
-    return result;
+async function readReviewGroups(path: string | undefined) {
+  if (!path) {
+    return undefined;
   }
-  try {
-    return await CommandUiRenderer.run(params);
-  } catch (error) {
-    commandErrorRendered = true;
-    throw error;
-  }
+  return ReviewGroupsInputParser.parse({
+    value: JSON.parse(await readInput(path)) as unknown,
+  });
 }
 
 async function main() {
@@ -170,14 +176,15 @@ async function main() {
     return;
   }
 
-  if (command === "setup" || command === "install") {
+  const isSetupCommand = command === "setup" || command === "install";
+  if (isSetupCommand) {
     const target = takeOption("--target") ?? "all";
     if (!isAgentInstallTarget(target)) {
       throw new Error("setup --target must be one of: all, pi, claude, codex.");
     }
     const plan = AgentInstallPlanner.createPlan({ target });
     if (takeFlag("--dry-run")) {
-      await runCommand({
+      await CliCommandRunner.run({
         label: "Planning lgtm setup",
         execute: async () => ({ action: "setup" as const, target, steps: plan, dryRun: true }),
         renderSuccess: function renderSuccess(result) {
@@ -186,7 +193,7 @@ async function main() {
       });
       return;
     }
-    await runCommand({
+    await CliCommandRunner.run({
       label: "Setting up lgtm integrations",
       execute: async () => ({
         action: "setup" as const,
@@ -207,7 +214,7 @@ async function main() {
     }
     const plan = AgentUpdatePlanner.createPlan({ target });
     if (takeFlag("--dry-run")) {
-      await runCommand({
+      await CliCommandRunner.run({
         label: "Planning lgtm update",
         execute: async () => ({
           action: "update" as const,
@@ -222,7 +229,7 @@ async function main() {
       });
       return;
     }
-    await runCommand({
+    await CliCommandRunner.run({
       label: "Preparing lgtm update",
       successLabel: "Update finished",
       execute: async function execute(report) {
@@ -289,7 +296,7 @@ async function main() {
       console.log(helpText());
       return;
     }
-    await runCommand({
+    await CliCommandRunner.run({
       label: "Showing lgtm help",
       execute: async () => undefined,
       renderSuccess: helpText,
@@ -302,32 +309,37 @@ async function main() {
 
     if (reviewCommand === "git") {
       const name = takeOption("--name");
+      const groupsPath = takeOption("--groups");
       const sinceLast = takeFlag("--since-last");
+      const remote = takeOption("--remote");
+      const remoteCwd = takeOption("--remote-cwd");
       if (!name) {
         throw new Error("review git requires --name <name>.");
       }
-      await runCommand({
+      await CliCommandRunner.run({
         label: "Opening Git review",
         execute: async (report) => {
+          const groups = await readReviewGroups(groupsPath);
           report(sinceLast ? "Collecting changes since the last review" : "Collecting Git changes");
-          if (sinceLast) {
-            const collection = await collectGitReviewFilesSinceLast(
-              cwd,
-              cancellation.signal,
-              reviewSessionId,
-            );
-            return await openReview(
-              {
-                kind: "diff",
-                name,
-                files: collection.files,
-                checkpoint: collection.checkpoint,
-              },
-              reviewOptions(report),
-            );
-          }
-          const files = await collectGitReviewFiles(cwd);
-          return await openReview({ kind: "diff", name, files }, reviewOptions(report));
+          const collection = await GitReviewCommand.collect({
+            cwd,
+            remote,
+            remoteCwd,
+            sessionId: reviewSessionId,
+            signal: cancellation.signal,
+            sinceLast,
+          });
+          return await openReview(
+            {
+              kind: "diff",
+              name,
+              files: collection.files,
+              groups,
+              checkpoint: collection.checkpoint,
+              source: collection.source,
+            },
+            reviewOptions(report),
+          );
         },
         renderSuccess: formatPointer,
       });
@@ -340,12 +352,29 @@ async function main() {
         throw new Error("worktree requires a path.");
       }
       const name = takeOption("--name") ?? "Worktree review";
-      await runCommand({
+      const groupsPath = takeOption("--groups");
+      const remote = takeOption("--remote");
+      await CliCommandRunner.run({
         label: "Opening worktree review",
         execute: async (report) => {
+          const groups = await readReviewGroups(groupsPath);
           report("Collecting worktree changes");
-          const files = await collectGitReviewFiles(resolve(cwd, worktree));
-          return await openReview({ kind: "diff", name, files }, reviewOptions(report));
+          const collection = await GitReviewCommand.collect({
+            cwd: remote ? cwd : resolve(cwd, worktree),
+            remote,
+            remoteCwd: remote ? worktree : undefined,
+            signal: cancellation.signal,
+          });
+          return await openReview(
+            {
+              kind: "diff",
+              name,
+              files: collection.files,
+              groups,
+              source: collection.source,
+            },
+            reviewOptions(report),
+          );
         },
         renderSuccess: formatPointer,
       });
@@ -355,7 +384,7 @@ async function main() {
     if (reviewCommand === "json") {
       const positionalInput = args[0]?.startsWith("--") ? undefined : args.shift();
       const inputPath = takeOption("--input") ?? positionalInput;
-      await runCommand({
+      await CliCommandRunner.run({
         label: "Opening JSON review",
         execute: async (report) => {
           report("Reading review JSON");
@@ -364,7 +393,7 @@ async function main() {
           });
           const name = takeOption("--name") ?? input.name ?? "JSON review";
           return await openReview(
-            { kind: "diff", name, files: input.files },
+            { kind: "diff", name, files: input.files, groups: input.groups },
             reviewOptions(report),
           );
         },
@@ -375,7 +404,7 @@ async function main() {
 
     if (reviewCommand === "document") {
       const documentPath = args[0]?.startsWith("--") ? undefined : args.shift();
-      await runCommand({
+      await CliCommandRunner.run({
         label: "Opening document review",
         execute: async (report) => {
           report("Reading Markdown document");
@@ -400,7 +429,7 @@ async function main() {
       if (!reviewPath) {
         throw new Error("result requires --review-path.");
       }
-      await runCommand({
+      await CliCommandRunner.run({
         label: "Reading lgtm review result",
         execute: async () => await finishReview(cwd, reviewPath),
         renderSuccess: (result) =>

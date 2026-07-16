@@ -8,7 +8,8 @@ const root = resolve(import.meta.dirname, "..");
 const releaseType = process.argv[2] as ReleaseType | undefined;
 const dryRun = process.argv.includes("--dry-run");
 
-if (!releaseType || !["patch", "minor", "major"].includes(releaseType)) {
+const isInvalidReleaseType = !releaseType || !["patch", "minor", "major"].includes(releaseType);
+if (isInvalidReleaseType) {
   throw new Error("Usage: bun scripts/release.ts <patch|minor|major> [--dry-run]");
 }
 

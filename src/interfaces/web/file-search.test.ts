@@ -52,7 +52,7 @@ describe("FileSearchClass", () => {
   });
 
   it("normalizes case and accents", () => {
-    const accentedFile = { ...files[4]!, location: "Guides/Résumé.md" };
+    const accentedFile = { ...files[4], location: "Guides/Résumé.md" };
     expect(FileSearch.search({ files: [accentedFile], query: "resume" })).toEqual([accentedFile]);
   });
 
