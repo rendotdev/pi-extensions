@@ -10,5 +10,5 @@
     "allowImportingTsExtensions": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["scripts/**/*.ts", "src/**/*.ts"]
+  "include": ["e2e/**/*.ts", "scripts/**/*.ts", "src/**/*.ts"]
 }

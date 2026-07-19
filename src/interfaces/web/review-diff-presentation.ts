@@ -72,6 +72,8 @@ export const ReviewDiffPresentation = new ReviewDiffPresentationClass(
       "[data-code] { padding-block: 0 !important; }",
       // Pierre's scroll mode otherwise reserves a scrollbar gutter even when every line fits.
       "[data-code] { overflow-x: auto !important; }",
+      // Comment selection uses whole rows instead of the browser's character ranges.
+      "[data-line] { user-select: none !important; -webkit-user-select: none !important; }",
       "[data-change-icon] { opacity: 0.72; transform: scale(0.9); transform-origin: center; }",
       "[data-diff-span] { border-radius: var(--review-radius) !important; }",
       "[data-separator-content], [data-expand-button], [data-separator-wrapper] { border-color: var(--border) !important; border-radius: var(--review-radius) !important; }",

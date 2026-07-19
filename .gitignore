@@ -11,3 +11,6 @@ dist/
 extensions/
 coverage/
 .lgtm/
+e2e/.generated/
+playwright-report/
+test-results/

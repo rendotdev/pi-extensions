@@ -18,75 +18,9 @@
   margin-block-start: calc(var(--typeset-flow) / 0.875);
 }
 
-.document-code pre {
-  margin-block: 0;
-  border-radius: 0;
-}
-
-.document-code .shiki {
-  --diffs-mixer: light-dark(#000, #fff);
-  --diffs-bg: light-dark(var(--diffs-light-bg), var(--diffs-dark-bg));
-  --diffs-addition-base: light-dark(
-    var(--diffs-light-addition-color),
-    var(--diffs-dark-addition-color)
-  );
-  --diffs-deletion-base: light-dark(
-    var(--diffs-light-deletion-color),
-    var(--diffs-dark-deletion-color)
-  );
-  --diffs-bg-separator: light-dark(
-    color-mix(in lab, var(--diffs-bg) 96%, var(--diffs-mixer)),
-    color-mix(in lab, var(--diffs-bg) 85%, var(--diffs-mixer))
-  );
-  color: var(--shiki-light);
-  background-color: var(--diffs-bg);
-}
-
-.document-code .shiki span {
-  color: var(--shiki-light);
-  font-style: var(--shiki-light-font-style, inherit);
-  font-weight: var(--shiki-light-font-weight, inherit);
-  text-decoration: var(--shiki-light-text-decoration, inherit);
-}
-
-:root.dark .document-code .shiki,
-:root[data-theme="dark"] .document-code .shiki {
-  color: var(--shiki-dark);
-}
-
-:root.dark .document-code .shiki span,
-:root[data-theme="dark"] .document-code .shiki span {
-  color: var(--shiki-dark);
-  font-style: var(--shiki-dark-font-style, inherit);
-  font-weight: var(--shiki-dark-font-weight, inherit);
-  text-decoration: var(--shiki-dark-text-decoration, inherit);
-}
-
-.document-code .shiki .line {
-  box-sizing: border-box;
-  display: inline-block;
-  width: max-content;
-  min-width: calc(100% + 2em);
-  margin-inline: -1em;
-  padding-inline: 1em;
-}
-
-.document-code .shiki [data-diff-line="addition"] {
-  background-color: light-dark(
-    color-mix(in lab, var(--diffs-bg) 88%, var(--diffs-addition-base)),
-    color-mix(in lab, var(--diffs-bg) 80%, var(--diffs-addition-base))
-  );
-}
-
-.document-code .shiki [data-diff-line="deletion"] {
-  background-color: light-dark(
-    color-mix(in lab, var(--diffs-bg) 88%, var(--diffs-deletion-base)),
-    color-mix(in lab, var(--diffs-bg) 80%, var(--diffs-deletion-base))
-  );
-}
-
-.document-code .shiki [data-diff-line="hunk"] {
-  background-color: var(--diffs-bg-separator);
+.typeset tr[data-annotated="true"] > th,
+.typeset tr[data-annotated="true"] > td {
+  background-image: linear-gradient(rgb(0 112 243 / 10%), rgb(0 112 243 / 10%));
 }
 
 :root {

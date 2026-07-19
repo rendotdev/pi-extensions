@@ -92,6 +92,32 @@ export default defineConfig(async ({ command, mode }): Promise<ViteUserConfig> =
     build: {
       outDir: "../../../dist/web",
       emptyOutDir: true,
+      rolldownOptions: {
+        output: {
+          manualChunks(id) {
+            const isDocumentMarkdownDependency =
+              id.includes("/react-markdown/") ||
+              id.includes("/remark-") ||
+              id.includes("/rehype-") ||
+              id.includes("/unified/") ||
+              id.includes("/micromark") ||
+              id.includes("/mdast-") ||
+              id.includes("/hast-");
+            if (isDocumentMarkdownDependency) {
+              return "document-markdown";
+            }
+            const isCodeRenderingDependency = id.includes("/@pierre/diffs/");
+            if (isCodeRenderingDependency) {
+              return "code-rendering";
+            }
+            const isUiDependency = id.includes("/@heroui/") || id.includes("/framer-motion/");
+            if (isUiDependency) {
+              return "ui";
+            }
+            return undefined;
+          },
+        },
+      },
     },
     fmt: {
       ignorePatterns: ["dist/**", "extensions/**", ".lgtm/**"],
@@ -206,6 +232,16 @@ export default defineConfig(async ({ command, mode }): Promise<ViteUserConfig> =
         },
         "metadata:write": {
           command: "bun scripts/sync-plugin-metadata.ts",
+          cache: false,
+        },
+        "test:e2e:fixtures": {
+          command: "bun scripts/generate-large-review-fixtures.ts",
+          cache: true,
+          output: ["e2e/.generated/**"],
+        },
+        "test:e2e:performance": {
+          command: "vp exec playwright test --config e2e/playwright.config.ts",
+          dependsOn: ["build:package", "test:e2e:fixtures"],
           cache: false,
         },
         "release:major:task": {

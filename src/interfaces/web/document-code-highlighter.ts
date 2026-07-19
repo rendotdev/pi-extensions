@@ -19,23 +19,36 @@ export class DocumentCodeHighlighterClass extends DomainClass<
     return language === "patch" ? "diff" : language;
   }
 
-  public highlight(params: { code: string; className?: string }): Promise<string> {
+  public highlight(params: {
+    code: string;
+    className?: string;
+    sourceStartLine?: number;
+  }): Promise<string> {
     const language = this.languageFromClassName({ className: params.className });
-    const cacheKey = `${language}\0${params.code}`;
+    const sourceStartLine = params.sourceStartLine ?? 1;
+    const cacheKey = `${language}\0${sourceStartLine}\0${params.code}`;
     const cached = this.cache.get(cacheKey);
     if (cached) {
       return cached;
     }
-    const highlighted = this.render({ code: params.code, language });
+    const highlighted = this.render({ code: params.code, language, sourceStartLine });
     this.cache.set(cacheKey, highlighted);
     return highlighted;
   }
 
-  private async render(params: { code: string; language: string }): Promise<string> {
+  private async render(params: {
+    code: string;
+    language: string;
+    sourceStartLine: number;
+  }): Promise<string> {
     const themeStyles = await this.deps.reviewDiffPresentation.themeStyles();
     const transformers = [
       this.themeStylesTransformer({ themeStyles }),
-      ...this.transformers({ code: params.code, language: params.language }),
+      ...this.transformers({
+        code: params.code,
+        language: params.language,
+        sourceStartLine: params.sourceStartLine,
+      }),
     ];
     try {
       return await this.deps.codeToHtml(params.code, {
@@ -49,7 +62,14 @@ export class DocumentCodeHighlighterClass extends DomainClass<
         lang: "text",
         themes: this.deps.reviewDiffPresentation.themes(),
         defaultColor: false,
-        transformers: [this.themeStylesTransformer({ themeStyles })],
+        transformers: [
+          this.themeStylesTransformer({ themeStyles }),
+          ...this.transformers({
+            code: params.code,
+            language: "text",
+            sourceStartLine: params.sourceStartLine,
+          }),
+        ],
       });
     }
   }
@@ -66,18 +86,21 @@ export class DocumentCodeHighlighterClass extends DomainClass<
     };
   }
 
-  private transformers(params: { code: string; language: string }): ShikiTransformer[] {
-    if (params.language !== "diff") {
-      return [];
-    }
+  private transformers(params: {
+    code: string;
+    language: string;
+    sourceStartLine: number;
+  }): ShikiTransformer[] {
     const lines = params.code.split(/\r?\n/);
     return [
       {
         name: "lgtm-document-diff-lines",
         line: (node, lineNumber) => {
-          const kind = this.diffLineKind({
-            line: lines[lineNumber - 1] ?? "",
-          });
+          node.properties["data-document-line"] = params.sourceStartLine + lineNumber - 1;
+          const kind =
+            params.language === "diff"
+              ? this.diffLineKind({ line: lines[lineNumber - 1] ?? "" })
+              : null;
           if (kind) {
             node.properties["data-diff-line"] = kind;
           }

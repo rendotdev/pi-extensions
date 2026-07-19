@@ -53,8 +53,11 @@ describe("DocumentCodeHighlighterClass", () => {
         "+const attempts = 3;",
       ].join("\n"),
       className: "language-patch",
+      sourceStartLine: 14,
     });
 
+    expect(html).toContain('data-document-line="14"');
+    expect(html).toContain('data-document-line="19"');
     expect(html.match(/data-diff-line="header"/g)).toHaveLength(3);
     expect(html).toContain('data-diff-line="hunk"');
     expect(html).toContain('data-diff-line="deletion"');
@@ -79,5 +82,15 @@ describe("DocumentCodeHighlighterClass", () => {
     await DocumentCodeHighlighter.highlight({ code: "const value = 1;", className: "language-ts" });
 
     expect(codeToHtmlSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("caches the same code separately when its document line changes", async () => {
+    const codeToHtmlSpy = vi.fn(codeToHtml);
+    const DocumentCodeHighlighter = highlighter({ codeToHtml: codeToHtmlSpy });
+
+    await DocumentCodeHighlighter.highlight({ code: "value", sourceStartLine: 2 });
+    await DocumentCodeHighlighter.highlight({ code: "value", sourceStartLine: 3 });
+
+    expect(codeToHtmlSpy).toHaveBeenCalledTimes(2);
   });
 });

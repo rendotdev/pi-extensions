@@ -21,6 +21,9 @@ describe("ReviewDiffPresentationClass", () => {
       disableFileHeader: true,
       lineDiffType: "word",
     });
+    expect(ReviewDiffPresentation.fileOptions().unsafeCSS).toContain(
+      "[data-line] { user-select: none",
+    );
   });
 
   it("derives the GitHub diff palette from Pierre's configured themes", async () => {
