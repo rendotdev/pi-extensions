@@ -365,21 +365,16 @@ export const { ReviewFormatterSingleton, ReviewFormatterSingletonBuilder } = bui
 
         let commentCount = 0;
         for (const file of review.files) {
-          lines.push(`## ${file.location}`);
-          lines.push(`Changes: +${file.added} -${file.removed}`);
-
-          if (file.comments.length === 0) {
-            lines.push("");
-            lines.push("No comments for this file.");
-            lines.push("");
+          const comments = file.comments.filter((comment) => comment.comment.trim().length > 0);
+          if (comments.length === 0) {
             continue;
           }
 
-          for (const comment of file.comments) {
-            if (comment.comment.trim().length === 0) {
-              continue;
-            }
-            commentCount += 1;
+          commentCount += comments.length;
+          lines.push(`## ${file.location}`);
+          lines.push(`Changes: +${file.added} -${file.removed}`);
+
+          for (const comment of comments) {
             lines.push("");
             lines.push(`- ${formatLineRange({ comment })}`);
             lines.push(

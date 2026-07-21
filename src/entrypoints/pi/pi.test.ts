@@ -88,10 +88,10 @@ describe("LgtmPiExtensionService", () => {
     );
 
     expect(sentMessages).toHaveLength(1);
-    expect(sentMessages[0]?.deliverAs).toBe("followUp");
-    expect(sentMessages[0]?.content).toContain("supplements the existing conversation");
-    expect(sentMessages[0]?.content).toContain("Preserve the original user goal");
-    expect(sentMessages[0]?.content).toContain("Review status: approved");
+    expect(sentMessages[0]).toEqual({
+      content: "Review status: approved",
+      deliverAs: "followUp",
+    });
     expect(finishReview).toHaveBeenCalledWith(
       "/tmp/project",
       ".lgtm/session-1-review-1/review.json",

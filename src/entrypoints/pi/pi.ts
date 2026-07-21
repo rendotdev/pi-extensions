@@ -73,28 +73,7 @@ export const { LgtmPiExtensionService, LgtmPiExtensionServiceBuilder } = build()
           cleanupOnExit: true,
           onFinished: async (review, formattedReview) => {
             reviewPaths.delete(review.reviewPath);
-            const decision =
-              review.status === "approved"
-                ? "approved"
-                : review.status === "canceled"
-                  ? "canceled"
-                  : "returned with review comments";
-            const nextStep =
-              review.status === "approved"
-                ? "The human approved this checkpoint. Complete any outstanding steps from the original request without reopening unchanged work."
-                : review.status === "canceled"
-                  ? "Do not treat this as approval. Preserve the current work and follow the original task only where it remains safe to proceed."
-                  : "Apply every actionable comment in the context of the original request, validate the revision, and reopen review only if approval is still required.";
-            pi.sendUserMessage(
-              [
-                `The LGTM review "${review.name}" was ${decision}.`,
-                "This review result supplements the existing conversation. Preserve the original user goal, constraints, completed work, validation evidence, and remaining steps.",
-                nextStep,
-                "",
-                formattedReview,
-              ].join("\n"),
-              { deliverAs: "followUp" },
-            );
+            pi.sendUserMessage(formattedReview, { deliverAs: "followUp" });
           },
         };
       }

@@ -115,4 +115,48 @@ describe("review domain", () => {
       "Status: approved",
     );
   });
+
+  it("formats only files with written comments", () => {
+    const review = ReviewBuilderSingleton.build({
+      kind: "diff",
+      name: "Commented review",
+      sessionId: "session",
+      reviewUUID: "review-uuid",
+      reviewId: "review-id",
+      cwd: "/project",
+      appDir: "/project/.lgtm/review-id",
+      reviewPath: "/project/.lgtm/review-id/review.json",
+      generatedAt: "2026-07-12T00:00:00.000Z",
+      files: [
+        ReviewSourceSingleton.build({
+          file: { location: "commented.ts", oldContent: "old", newContent: "new" },
+          index: 0,
+        }),
+        ReviewSourceSingleton.build({
+          file: { location: "uncommented.ts", oldContent: "old", newContent: "new" },
+          index: 1,
+        }),
+      ],
+    });
+    review.files[0]?.comments.push({
+      id: "comment",
+      fileLocation: "commented.ts",
+      selectedRowIds: [],
+      selectedText: "new",
+      side: "additions",
+      selectedRange: { start: 1, end: 1 },
+      startLine: 1,
+      endLine: 1,
+      lineNumbers: [1],
+      comment: "Keep this change",
+      createdAt: "2026-07-12T00:00:00.000Z",
+      updatedAt: "2026-07-12T00:00:00.000Z",
+    });
+
+    const formatted = ReviewFormatterSingleton.format({ review, reviewPath: review.reviewPath });
+
+    expect(formatted).toContain("## commented.ts");
+    expect(formatted).not.toContain("uncommented.ts");
+    expect(formatted).not.toContain("No comments for this file.");
+  });
 });
