@@ -1,6 +1,6 @@
 {
   "name": "lgtm",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Human approval for agent work, with code diff and Markdown review.",
   "author": {
     "name": "René-Pier Deshaies-Gélinas",
