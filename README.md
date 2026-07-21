@@ -8,6 +8,8 @@ LGTM adds a human checkpoint for agentic work by opening a local browser where y
 
 ![LGTM reviewing and commenting on a TypeScript diff](https://raw.githubusercontent.com/rendotdev/lgtm/main/assets/lgtm-demo-diff.jpg)
 
+<br />
+
 ![LGTM reviewing and commenting on a rendered Markdown implementation plan](https://raw.githubusercontent.com/rendotdev/lgtm/main/assets/lgtm-demo-document.jpg)
 
 ## Install
@@ -17,14 +19,7 @@ npm install --global @rendotdev/lgtm
 lgtm setup
 ```
 
-`lgtm setup` installs LGTM integrations for Pi, Claude Code, and Codex.
-
-<details>
-<summary>Install one integration</summary>
-
-Add `--target pi`, `--target claude`, or `--target codex` to `lgtm setup`.
-
-</details>
+> `lgtm setup` installs the LGTM plugin and skill for Pi, Claude Code, and Codex. To configure one integration only, pass `--target pi`, `--target claude`, or `--target codex`.
 
 ## Features
 
