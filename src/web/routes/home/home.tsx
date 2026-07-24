@@ -750,7 +750,6 @@ function HomeRouteView() {
         onLineWrapChange: updateLineWrap,
         onToggleAllFiles: toggleAllFiles,
         primaryShortcutLabel,
-        sidebarWidth: payload.kind === "diff" ? displayedSidebarWidth : 0,
         status: currentReviewStatus,
       }}
       view={
@@ -869,7 +868,7 @@ function ReviewGroupHeader(props: {
 }) {
   return (
     <div
-      className="flex items-end justify-between gap-4 border-b border-border px-1 pb-3 pt-1"
+      className="flex items-end justify-between gap-4 px-1 pb-3 pt-1"
       data-review-group-header=""
     >
       <div className="min-w-0">
@@ -1630,7 +1629,7 @@ const DocumentReviewSurface = React.memo(function DocumentReviewSurface(
   );
 
   return (
-    <div className="bg-background">
+    <div className="bg-transparent">
       <DocumentCodePreferencesContext.Provider value={documentCodePreferences}>
         <DocumentMarkdownTree
           {...props}

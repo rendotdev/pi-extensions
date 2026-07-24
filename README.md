@@ -6,11 +6,11 @@
 
 LGTM adds a human checkpoint for agentic work by opening a local browser where you can review a diff or document, see exactly what changed, and leave feedback on the relevant lines. Your decision returns to the agent so it can make changes, continue, or stop.
 
-![LGTM reviewing and commenting on a TypeScript diff](https://raw.githubusercontent.com/rendotdev/lgtm/main/assets/lgtm-demo-diff.jpg)
+![LGTM reviewing and commenting on a TypeScript diff](https://raw.githubusercontent.com/rendotdev/lgtm/main/assets/lgtm-demo-diff-dark.jpg)
 
 <br />
 
-![LGTM reviewing and commenting on a rendered Markdown implementation plan](https://raw.githubusercontent.com/rendotdev/lgtm/main/assets/lgtm-demo-document.jpg)
+![LGTM reviewing and commenting on a rendered Markdown implementation plan](https://raw.githubusercontent.com/rendotdev/lgtm/main/assets/lgtm-demo-document-dark.jpg)
 
 ## Install
 

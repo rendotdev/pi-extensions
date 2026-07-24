@@ -19,7 +19,7 @@ export type HomeSidebarProps = {
 function HomeSidebarView(props: HomeSidebarProps) {
   return (
     <aside
-      className="relative row-span-2 row-start-1 flex h-full min-h-0 shrink-0 flex-col border-r border-border bg-surface"
+      className="relative row-span-2 row-start-1 flex h-full min-h-0 shrink-0 flex-col border-r border-border bg-transparent"
       style={{ width: props.width }}
     >
       <div

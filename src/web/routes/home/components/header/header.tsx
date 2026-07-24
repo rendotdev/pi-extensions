@@ -40,7 +40,6 @@ export type HomeHeaderProps = {
   onLineWrapChange: (lineWrap: boolean) => void;
   onToggleAllFiles: () => void;
   primaryShortcutLabel: string;
-  sidebarWidth: number;
   status: {
     label: string;
     tone: "busy" | "idle" | "success" | "warning";
@@ -51,7 +50,7 @@ function HomeHeaderView(props: HomeHeaderProps) {
   return (
     <header
       ref={props.headerRef}
-      className="sticky top-0 z-10 border-b border-border bg-background"
+      className="sticky top-0 z-10 border-b border-border bg-transparent"
     >
       <div className="flex min-w-0">
         <div className="min-w-0 flex-1">
@@ -79,7 +78,6 @@ function HomeHeaderView(props: HomeHeaderProps) {
                   : "flex shrink-0 items-center justify-end"
               }
               data-review-header-row="actions"
-              style={props.kind === "diff" ? { paddingLeft: props.sidebarWidth } : undefined}
             >
               {props.kind === "diff" ? (
                 <div className="flex min-w-0 items-center gap-2 overflow-x-auto">

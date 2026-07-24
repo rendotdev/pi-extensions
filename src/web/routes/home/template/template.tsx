@@ -21,7 +21,7 @@ export type HomeTemplateProps = {
 
 function HomeTemplateView(props: HomeTemplateProps) {
   return (
-    <div className="h-dvh overflow-hidden bg-background text-foreground" data-review-ready="">
+    <div className="h-dvh overflow-hidden bg-transparent text-foreground" data-review-ready="">
       <HomeHeaderComponent {...props.header} />
       {props.view.kind === "document" ? (
         <HomeContentComponent

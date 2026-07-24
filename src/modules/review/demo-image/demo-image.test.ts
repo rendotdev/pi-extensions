@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { DemoImageServiceBuilder } from "./demo-image.ts";
+import { DemoImageServiceBuilder, DemoImageShellSingleton } from "./demo-image.ts";
 
 const pointer = {
   name: "Demo",
@@ -10,6 +10,38 @@ const pointer = {
   url: "http://localhost:4000/",
   reviewPath: "/project/.lgtm/review-id/review.json",
 };
+
+describe("DemoImageShellSingleton", () => {
+  it("creates a light macOS browser shell around the review", () => {
+    const markup = DemoImageShellSingleton.createMarkup({
+      theme: "light",
+      url: 'http://localhost:4000/?name="demo"&kind=diff',
+    });
+
+    expect(markup).toContain('data-theme="light"');
+    expect(markup).toContain('aria-label="macOS browser preview"');
+    expect(markup).toContain('class="traffic-light close"');
+    expect(markup).toContain("lgtm review");
+    expect(markup).toContain('src="http://localhost:4000/?name=&quot;demo&quot;&amp;kind=diff"');
+  });
+
+  it("creates the dark presentation theme", () => {
+    const markup = DemoImageShellSingleton.createMarkup({
+      theme: "dark",
+      url: "http://localhost:4000/",
+    });
+
+    expect(markup).toContain('data-theme="dark"');
+    expect(markup).toContain("--canvas: #08090a");
+    expect(markup).toContain("--floor: #d0d6e0");
+    expect(markup).toContain("linear-gradient(var(--canvas) 10%, var(--floor) 100%)");
+    expect(markup).toContain("right: 0");
+    expect(markup).toContain("left: 0");
+    expect(markup).toContain("width: min(1280px, calc(100vw - 160px))");
+    expect(markup).toContain("height: calc(100vh - 288px)");
+    expect(markup).toContain("transform: translateY(-48px)");
+  });
+});
 
 describe("DemoImageService", () => {
   it("renders and stops a headless demo review", async () => {
