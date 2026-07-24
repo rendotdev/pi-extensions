@@ -3,9 +3,8 @@ import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, test, type Locator, type Page, type TestInfo } from "playwright/test";
-import { build } from "../src/builder.ts";
-import type { ReviewPointer } from "../src/modules/review/review/review.ts";
-import { stopReview } from "../src/modules/review/server/server.ts";
+import { defineRuntime } from "../src/define.ts";
+import { stopReview, type ReviewPointer } from "../src/domains/review/index.ts";
 import type { LargeReviewFixtureManifest } from "../scripts/generate-large-review-fixtures.ts";
 
 type PerformanceMetric = {
@@ -21,437 +20,412 @@ type FrameTiming = {
   p95FrameMs: number;
 };
 
-const { LargeReviewEnvironmentServiceBuilder } = build().service("LargeReviewEnvironmentService", {
-  config: {
+class ReviewEnvironment extends defineRuntime({
+  params: {
     cliPath: resolve(process.cwd(), "dist/cli.mjs"),
     fixtureDirectory: resolve(process.cwd(), "e2e/.generated"),
     nodeExecutable: process.execPath,
     projectDirectory: process.cwd(),
   },
   deps: { execFileSync, mkdtemp, rm, stopReview },
-  build({ config, deps }) {
-    let cwd: string | undefined;
-    let pointer: ReviewPointer | undefined;
+}) {
+  private cwd: string | undefined;
+  private pointer: ReviewPointer | undefined;
 
-    async function startDiff(params: {}): Promise<ReviewPointer> {
-      void params;
-      return await start({
-        command: "json",
-        fixture: resolve(config.fixtureDirectory, "large-diff.json"),
-        name: "Extremely large diff",
-      });
-    }
+  public async startDiff(params: {}): Promise<ReviewPointer> {
+    void params;
+    return await this.start({
+      command: "json",
+      fixture: resolve(this.params.fixtureDirectory, "large-diff.json"),
+      name: "Extremely large diff",
+    });
+  }
 
-    async function startDocument(params: {}): Promise<ReviewPointer> {
-      void params;
-      return await start({
-        command: "document",
-        fixture: resolve(config.fixtureDirectory, "large-document.md"),
-        name: "Extremely large document",
-      });
-    }
+  public async startDocument(params: {}): Promise<ReviewPointer> {
+    void params;
+    return await this.start({
+      command: "document",
+      fixture: resolve(this.params.fixtureDirectory, "large-document.md"),
+      name: "Extremely large document",
+    });
+  }
 
-    async function stop(params: {}): Promise<void> {
-      void params;
-      const reviewCwd = cwd;
-      const reviewPointer = pointer;
-      pointer = undefined;
-      cwd = undefined;
-      try {
-        const shouldStopReview = reviewCwd !== undefined && reviewPointer !== undefined;
-        if (shouldStopReview) {
-          await deps.stopReview(reviewCwd, reviewPointer.reviewPath);
-        }
-      } finally {
-        if (reviewCwd) {
-          await deps.rm(reviewCwd, { force: true, recursive: true });
-        }
+  public async stop(params: {}): Promise<void> {
+    void params;
+    const reviewCwd = this.cwd;
+    const reviewPointer = this.pointer;
+    this.pointer = undefined;
+    this.cwd = undefined;
+    try {
+      const shouldStopReview = reviewCwd !== undefined && reviewPointer !== undefined;
+      if (shouldStopReview) {
+        await this.deps.stopReview(reviewCwd, reviewPointer.reviewPath);
+      }
+    } finally {
+      if (reviewCwd) {
+        await this.deps.rm(reviewCwd, { force: true, recursive: true });
       }
     }
+  }
 
-    async function start(params: {
-      command: "document" | "json";
-      fixture: string;
-      name: string;
-    }): Promise<ReviewPointer> {
-      cwd = await deps.mkdtemp(join(tmpdir(), "lgtm-large-e2e-"));
-      try {
-        const output = deps.execFileSync(
-          config.nodeExecutable,
-          [
-            config.cliPath,
-            "review",
-            params.command,
-            params.fixture,
-            "--name",
-            params.name,
-            "--cwd",
-            cwd,
-            "--json",
-          ],
-          { cwd: config.projectDirectory, encoding: "utf8" },
-        );
-        pointer = JSON.parse(output) as ReviewPointer;
-        return pointer;
-      } catch (error) {
-        await stop({});
-        throw error;
-      }
+  private async start(params: {
+    command: "document" | "json";
+    fixture: string;
+    name: string;
+  }): Promise<ReviewPointer> {
+    this.cwd = await this.deps.mkdtemp(join(tmpdir(), "lgtm-large-e2e-"));
+    try {
+      const output = this.deps.execFileSync(
+        this.params.nodeExecutable,
+        [
+          this.params.cliPath,
+          "review",
+          params.command,
+          params.fixture,
+          "--name",
+          params.name,
+          "--cwd",
+          this.cwd,
+          "--json",
+        ],
+        { cwd: this.params.projectDirectory, encoding: "utf8" },
+      );
+      this.pointer = JSON.parse(output) as ReviewPointer;
+      return this.pointer;
+    } catch (error) {
+      await this.stop({});
+      throw error;
     }
+  }
+}
 
-    return { startDiff, startDocument, stop };
+class PerformanceDriver extends defineRuntime({
+  params: {
+    budgets: {
+      commentMs: 2_000,
+      initialRenderMs: 15_000,
+      interactionMs: 2_000,
+      scrollMs: 1_500,
+      typingMs: 2_000,
+    },
   },
-});
-
-const { ReviewPerformanceDriverServiceBuilder } = build().service(
-  "ReviewPerformanceDriverService",
-  {
-    config: {
-      budgets: {
-        commentMs: 2_000,
-        initialRenderMs: 15_000,
-        interactionMs: 2_000,
-        scrollMs: 1_500,
-        typingMs: 2_000,
+  deps: {},
+}) {
+  public async open(params: {
+    page: Page;
+    ready: Locator;
+    url: string;
+  }): Promise<PerformanceMetric> {
+    return await this.measure({
+      budgetMs: this.params.budgets.initialRenderMs,
+      label: "initial render",
+      operation: async function renderReview() {
+        await params.page.goto(params.url, { waitUntil: "domcontentloaded" });
+        await params.ready.waitFor({ state: "visible" });
       },
-    },
-    deps: {},
-    build({ config }) {
-      async function open(params: {
-        page: Page;
-        ready: Locator;
-        url: string;
-      }): Promise<PerformanceMetric> {
-        return await measure({
-          budgetMs: config.budgets.initialRenderMs,
-          label: "initial render",
-          operation: async function renderReview() {
-            await params.page.goto(params.url, { waitUntil: "domcontentloaded" });
-            await params.ready.waitFor({ state: "visible" });
-          },
-        });
-      }
+    });
+  }
 
-      async function interact(params: {
-        label: string;
-        operation: () => Promise<void>;
-      }): Promise<PerformanceMetric> {
-        return await measure({
-          budgetMs: config.budgets.interactionMs,
-          label: params.label,
-          operation: params.operation,
-        });
-      }
+  public async interact(params: {
+    label: string;
+    operation: () => Promise<void>;
+  }): Promise<PerformanceMetric> {
+    return await this.measure({
+      budgetMs: this.params.budgets.interactionMs,
+      label: params.label,
+      operation: params.operation,
+    });
+  }
 
-      async function scroll(params: {
-        label: string;
-        operation: () => Promise<void>;
-      }): Promise<PerformanceMetric> {
-        return await measure({
-          budgetMs: config.budgets.scrollMs,
-          label: params.label,
-          operation: params.operation,
-        });
-      }
+  public async scroll(params: {
+    label: string;
+    operation: () => Promise<void>;
+  }): Promise<PerformanceMetric> {
+    return await this.measure({
+      budgetMs: this.params.budgets.scrollMs,
+      label: params.label,
+      operation: params.operation,
+    });
+  }
 
-      async function wheelScrollAndHold(params: {
-        deltaY: number;
-        page: Page;
-        scrollElement: Locator;
-      }): Promise<void> {
-        const bounds = await params.scrollElement.boundingBox();
-        if (!bounds) {
-          throw new Error("The review scroll container is not visible.");
-        }
-        const scrollTopBefore = await params.scrollElement.evaluate((element) => element.scrollTop);
-        await params.page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
-        await params.page.mouse.wheel(0, params.deltaY);
-        await params.page.waitForTimeout(500);
-        const scrollTopAfter = await params.scrollElement.evaluate((element) => element.scrollTop);
-        expect(scrollTopAfter - scrollTopBefore).toBeGreaterThan(params.deltaY / 2);
-      }
+  public async wheelScrollAndHold(params: {
+    deltaY: number;
+    page: Page;
+    scrollElement: Locator;
+  }): Promise<void> {
+    const bounds = await params.scrollElement.boundingBox();
+    if (!bounds) {
+      throw new Error("The review scroll container is not visible.");
+    }
+    const scrollTopBefore = await params.scrollElement.evaluate((element) => element.scrollTop);
+    await params.page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    await params.page.mouse.wheel(0, params.deltaY);
+    await params.page.waitForTimeout(500);
+    const scrollTopAfter = await params.scrollElement.evaluate((element) => element.scrollTop);
+    expect(scrollTopAfter - scrollTopBefore).toBeGreaterThan(params.deltaY / 2);
+  }
 
-      async function addComment(params: {
-        label: string;
-        operation: () => Promise<void>;
-      }): Promise<PerformanceMetric> {
-        return await measure({
-          budgetMs: config.budgets.commentMs,
-          label: params.label,
-          operation: params.operation,
-        });
-      }
+  public async addComment(params: {
+    label: string;
+    operation: () => Promise<void>;
+  }): Promise<PerformanceMetric> {
+    return await this.measure({
+      budgetMs: this.params.budgets.commentMs,
+      label: params.label,
+      operation: params.operation,
+    });
+  }
 
-      async function typeComment(params: {
-        label: string;
-        operation: () => Promise<void>;
-      }): Promise<PerformanceMetric> {
-        return await measure({
-          budgetMs: config.budgets.typingMs,
-          label: params.label,
-          operation: params.operation,
-        });
-      }
+  public async typeComment(params: {
+    label: string;
+    operation: () => Promise<void>;
+  }): Promise<PerformanceMetric> {
+    return await this.measure({
+      budgetMs: this.params.budgets.typingMs,
+      label: params.label,
+      operation: params.operation,
+    });
+  }
 
-      async function lineTop(params: { host: Locator; lineNumber: number }): Promise<number> {
-        await waitForLine({ host: params.host, lineNumber: params.lineNumber });
-        return await params.host.evaluate((host, lineNumber) => {
-          const line = Array.from(
-            host.shadowRoot?.querySelectorAll<HTMLElement>(
-              `[data-column-number="${lineNumber}"][data-line-index]`,
-            ) ?? [],
-          ).at(-1);
-          return line?.getBoundingClientRect().top ?? Number.NaN;
-        }, params.lineNumber);
-      }
+  public async lineTop(params: { host: Locator; lineNumber: number }): Promise<number> {
+    await this.waitForLine({ host: params.host, lineNumber: params.lineNumber });
+    return await params.host.evaluate((host, lineNumber) => {
+      const line = Array.from(
+        host.shadowRoot?.querySelectorAll<HTMLElement>(
+          `[data-column-number="${lineNumber}"][data-line-index]`,
+        ) ?? [],
+      ).at(-1);
+      return line?.getBoundingClientRect().top ?? Number.NaN;
+    }, params.lineNumber);
+  }
 
-      async function scrollLineIntoView(params: {
-        host: Locator;
-        lineNumber: number;
-      }): Promise<void> {
-        await waitForLine({ host: params.host, lineNumber: params.lineNumber });
-        await params.host.evaluate((host, lineNumber) => {
-          const line = Array.from(
-            host.shadowRoot?.querySelectorAll<HTMLElement>(
-              `[data-column-number="${lineNumber}"][data-line-index]`,
-            ) ?? [],
-          ).at(-1);
-          line?.scrollIntoView({ block: "center" });
-        }, params.lineNumber);
-      }
+  public async scrollLineIntoView(params: { host: Locator; lineNumber: number }): Promise<void> {
+    await this.waitForLine({ host: params.host, lineNumber: params.lineNumber });
+    await params.host.evaluate((host, lineNumber) => {
+      const line = Array.from(
+        host.shadowRoot?.querySelectorAll<HTMLElement>(
+          `[data-column-number="${lineNumber}"][data-line-index]`,
+        ) ?? [],
+      ).at(-1);
+      line?.scrollIntoView({ block: "center" });
+    }, params.lineNumber);
+  }
 
-      async function clickLine(params: {
-        host: Locator;
-        lineNumber: number;
-        page: Page;
-      }): Promise<void> {
-        await waitForLine({ host: params.host, lineNumber: params.lineNumber });
-        const point = await params.host.evaluate((host, lineNumber) => {
-          const candidates = Array.from(
-            host.shadowRoot?.querySelectorAll<HTMLElement>(
-              `[data-column-number="${lineNumber}"][data-line-index]`,
-            ) ?? [],
-          );
-          const line = candidates.at(-1);
-          if (!line) {
-            throw new Error(`Missing rendered line ${lineNumber}.`);
-          }
-          line.scrollIntoView({ block: "center" });
-          const bounds = line.getBoundingClientRect();
-          return {
-            x: bounds.left + Math.min(12, bounds.width / 2),
-            y: bounds.top + bounds.height / 2,
-          };
-        }, params.lineNumber);
-        await params.page.mouse.click(point.x, point.y);
+  public async clickLine(params: { host: Locator; lineNumber: number }): Promise<void> {
+    await this.waitForLine({ host: params.host, lineNumber: params.lineNumber });
+    await params.host.evaluate((host, lineNumber) => {
+      const lines = Array.from(
+        host.shadowRoot?.querySelectorAll<HTMLElement>(
+          `[data-line="${lineNumber}"][data-line-index]:not([data-column-number])`,
+        ) ?? [],
+      ).filter((line) => !line.closest("[data-deletions]"));
+      const line = lines.at(-1);
+      if (!line) {
+        throw new Error(`Missing rendered line ${lineNumber}.`);
       }
-
-      async function dragAcrossCodeRow(params: {
-        host: Locator;
-        lineNumber: number;
-        page: Page;
-      }): Promise<void> {
-        await waitForLine({ host: params.host, lineNumber: params.lineNumber });
-        const points = await params.host.evaluate((host, lineNumber) => {
-          const gutterLines = Array.from(
-            host.shadowRoot?.querySelectorAll<HTMLElement>(
-              `[data-column-number="${lineNumber}"][data-line-index]`,
-            ) ?? [],
-          );
-          const gutterLine = gutterLines.at(-1);
-          const lineIndex = gutterLine?.getAttribute("data-line-index");
-          const line = Array.from(
-            host.shadowRoot?.querySelectorAll<HTMLElement>(
-              `[data-line-index]:not([data-column-number])`,
-            ) ?? [],
-          )
-            .filter((candidate) => candidate.getAttribute("data-line-index") === lineIndex)
-            .at(-1);
-          if (!line) {
-            throw new Error(`Missing rendered content for line ${lineNumber}.`);
-          }
-          const bounds = line.getBoundingClientRect();
-          return {
-            start: { x: bounds.left + 24, y: bounds.top + bounds.height / 2 },
-            end: {
-              x: bounds.left + Math.min(280, bounds.width - 24),
-              y: bounds.top + bounds.height / 2,
-            },
-          };
-        }, params.lineNumber);
-        await params.page.mouse.move(points.start.x, points.start.y);
-        await params.page.mouse.down();
-        await params.page.mouse.move(points.end.x, points.end.y);
-        const activeSelection = await params.host.evaluate((host, lineNumber) => {
-          const root = host.shadowRoot;
-          const selectedLineNumbers = Array.from(
-            root?.querySelectorAll<HTMLElement>("[data-line][data-selected-line]") ?? [],
-          ).map((line) => Number.parseInt(line.getAttribute("data-line") ?? "", 10));
-          return {
-            hasTargetRow: selectedLineNumbers.includes(lineNumber),
-            nativeText: window.getSelection()?.toString() ?? "",
-            selectedLineNumbers,
-          };
-        }, params.lineNumber);
-        expect(activeSelection.hasTargetRow, JSON.stringify(activeSelection)).toBe(true);
-        expect(activeSelection.nativeText).toBe("");
-        await params.page.mouse.up();
-      }
-
-      async function selectDocumentText(params: { element: Locator }): Promise<number> {
-        return await params.element.evaluate(async (element) => {
-          const textNode = Array.from(element.childNodes).find(
-            (node) =>
-              node.nodeType === Node.TEXT_NODE && (node.textContent?.trim().length ?? 0) > 0,
-          );
-          if (!textNode?.textContent) {
-            throw new Error("The document element has no selectable text.");
-          }
-          const range = document.createRange();
-          range.setStart(textNode, 0);
-          range.setEnd(textNode, Math.min(80, textNode.textContent.length));
-          const selection = window.getSelection();
-          selection?.removeAllRanges();
-          selection?.addRange(range);
-          const startedAt = performance.now();
-          element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-          while (!document.querySelector('[data-review-comment="true"] textarea')) {
-            await new Promise<void>((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
-          }
-          return Math.round((performance.now() - startedAt) * 10) / 10;
-        });
-      }
-
-      async function selectTableRow(params: { row: Locator }): Promise<void> {
-        await params.row.evaluate((row) => {
-          const cell = row.querySelector("td") ?? row;
-          const range = document.createRange();
-          range.selectNodeContents(cell);
-          const selection = window.getSelection();
-          selection?.removeAllRanges();
-          selection?.addRange(range);
-          row.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-        });
-      }
-
-      async function measureFrameTiming(params: {
-        operation: () => Promise<void>;
-        page: Page;
-      }): Promise<FrameTiming> {
-        await params.page.evaluate(() => {
-          const state = {
-            frame: 0,
-            intervals: [] as number[],
-            previousTime: performance.now(),
-          };
-          function measureFrame(currentTime: number) {
-            state.intervals.push(currentTime - state.previousTime);
-            state.previousTime = currentTime;
-            state.frame = requestAnimationFrame(measureFrame);
-          }
-          state.frame = requestAnimationFrame(measureFrame);
-          (
-            window as Window & {
-              __reviewFrameTiming?: typeof state;
-            }
-          ).__reviewFrameTiming = state;
-        });
-        await params.operation();
-        return await params.page.evaluate(async () => {
-          await new Promise<void>((resolveFrame) => {
-            requestAnimationFrame(() => requestAnimationFrame(() => resolveFrame()));
-          });
-          const state = (
-            window as Window & {
-              __reviewFrameTiming?: {
-                frame: number;
-                intervals: number[];
-                previousTime: number;
-              };
-            }
-          ).__reviewFrameTiming;
-          if (!state) {
-            throw new Error("Frame timing was not initialized.");
-          }
-          cancelAnimationFrame(state.frame);
-          const intervals = [...state.intervals].sort((left, right) => left - right);
-          const p95Index = Math.max(0, Math.ceil(intervals.length * 0.95) - 1);
-          return {
-            frameCount: intervals.length,
-            framesOverBudget: intervals.filter((duration) => duration > 100).length,
-            maxFrameMs: Math.round((intervals.at(-1) ?? 0) * 10) / 10,
-            p95FrameMs: Math.round((intervals[p95Index] ?? 0) * 10) / 10,
-          };
-        });
-      }
-
-      async function attachMetrics(params: {
-        metrics: PerformanceMetric[];
-        testInfo: TestInfo;
-      }): Promise<void> {
-        await params.testInfo.attach("performance-metrics", {
-          body: Buffer.from(`${JSON.stringify(params.metrics, null, 2)}\n`),
-          contentType: "application/json",
-        });
-      }
-
-      async function measure(params: {
-        budgetMs: number;
-        label: string;
-        operation: () => Promise<void>;
-      }): Promise<PerformanceMetric> {
-        const startedAt = performance.now();
-        await params.operation();
-        const durationMs = performance.now() - startedAt;
-        expect(durationMs, `${params.label} exceeded ${params.budgetMs} ms`).toBeLessThan(
-          params.budgetMs,
-        );
-        return {
-          budgetMs: params.budgetMs,
-          durationMs: Math.round(durationMs * 10) / 10,
-          label: params.label,
-        };
-      }
-
-      async function waitForLine(params: { host: Locator; lineNumber: number }): Promise<void> {
-        await expect
-          .poll(
-            async function findRenderedLine() {
-              return await params.host.evaluate((host, lineNumber) => {
-                return Boolean(
-                  host.shadowRoot?.querySelector(
-                    `[data-column-number="${lineNumber}"][data-line-index]`,
-                  ),
-                );
-              }, params.lineNumber);
-            },
-            { timeout: config.budgets.initialRenderMs },
-          )
-          .toBe(true);
-      }
-      return {
-        addComment,
-        attachMetrics,
-        clickLine,
-        dragAcrossCodeRow,
-        interact,
-        lineTop,
-        measureFrameTiming,
-        open,
-        scroll,
-        scrollLineIntoView,
-        selectDocumentText,
-        selectTableRow,
-        typeComment,
-        wheelScrollAndHold,
+      line.scrollIntoView({ block: "center" });
+      const bounds = line.getBoundingClientRect();
+      const eventInit = {
+        bubbles: true,
+        button: 0,
+        clientX: bounds.left + Math.min(24, bounds.width / 2),
+        clientY: bounds.top + bounds.height / 2,
+        composed: true,
+        pointerId: 1,
+        pointerType: "mouse",
       };
-    },
-  },
-);
+      line.dispatchEvent(new PointerEvent("pointerdown", { ...eventInit, buttons: 1 }));
+      line.dispatchEvent(new PointerEvent("pointerup", { ...eventInit, buttons: 0 }));
+    }, params.lineNumber);
+  }
+
+  public async dragAcrossCodeRow(params: {
+    host: Locator;
+    lineNumber: number;
+    page: Page;
+  }): Promise<void> {
+    await this.waitForLine({ host: params.host, lineNumber: params.lineNumber });
+    const points = await params.host.evaluate((host, lineNumber) => {
+      const gutterLines = Array.from(
+        host.shadowRoot?.querySelectorAll<HTMLElement>(
+          `[data-column-number="${lineNumber}"][data-line-index]`,
+        ) ?? [],
+      );
+      const gutterLine = gutterLines.at(-1);
+      const lineIndex = gutterLine?.getAttribute("data-line-index");
+      const line = Array.from(
+        host.shadowRoot?.querySelectorAll<HTMLElement>(
+          `[data-line-index]:not([data-column-number])`,
+        ) ?? [],
+      )
+        .filter((candidate) => candidate.getAttribute("data-line-index") === lineIndex)
+        .at(-1);
+      if (!line) {
+        throw new Error(`Missing rendered content for line ${lineNumber}.`);
+      }
+      const bounds = line.getBoundingClientRect();
+      return {
+        start: { x: bounds.left + 24, y: bounds.top + bounds.height / 2 },
+        end: {
+          x: bounds.left + Math.min(280, bounds.width - 24),
+          y: bounds.top + bounds.height / 2,
+        },
+      };
+    }, params.lineNumber);
+    await params.page.mouse.move(points.start.x, points.start.y);
+    await params.page.mouse.down();
+    await params.page.mouse.move(points.end.x, points.end.y);
+    const activeSelection = await params.host.evaluate((host, lineNumber) => {
+      const root = host.shadowRoot;
+      const selectedLineNumbers = Array.from(
+        root?.querySelectorAll<HTMLElement>("[data-line][data-selected-line]") ?? [],
+      ).map((line) => Number.parseInt(line.getAttribute("data-line") ?? "", 10));
+      return {
+        hasTargetRow: selectedLineNumbers.includes(lineNumber),
+        nativeText: window.getSelection()?.toString() ?? "",
+        selectedLineNumbers,
+      };
+    }, params.lineNumber);
+    expect(activeSelection.hasTargetRow, JSON.stringify(activeSelection)).toBe(true);
+    expect(activeSelection.nativeText).toBe("");
+    await params.page.mouse.up();
+  }
+
+  public async selectDocumentText(params: { element: Locator }): Promise<number> {
+    return await params.element.evaluate(async (element) => {
+      const textNode = Array.from(element.childNodes).find(
+        (node) => node.nodeType === Node.TEXT_NODE && (node.textContent?.trim().length ?? 0) > 0,
+      );
+      if (!textNode?.textContent) {
+        throw new Error("The document element has no selectable text.");
+      }
+      const range = document.createRange();
+      range.setStart(textNode, 0);
+      range.setEnd(textNode, Math.min(80, textNode.textContent.length));
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      const startedAt = performance.now();
+      element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      while (!document.querySelector('[data-review-comment="true"] textarea')) {
+        await new Promise<void>((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
+      }
+      return Math.round((performance.now() - startedAt) * 10) / 10;
+    });
+  }
+
+  public async selectTableRow(params: { row: Locator }): Promise<void> {
+    await params.row.evaluate((row) => {
+      const cell = row.querySelector("td") ?? row;
+      const range = document.createRange();
+      range.selectNodeContents(cell);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      row.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    });
+  }
+
+  public async measureFrameTiming(params: {
+    operation: () => Promise<void>;
+    page: Page;
+  }): Promise<FrameTiming> {
+    await params.page.evaluate(() => {
+      const state = {
+        frame: 0,
+        intervals: [] as number[],
+        previousTime: performance.now(),
+      };
+      function measureFrame(currentTime: number) {
+        state.intervals.push(currentTime - state.previousTime);
+        state.previousTime = currentTime;
+        state.frame = requestAnimationFrame(measureFrame);
+      }
+      state.frame = requestAnimationFrame(measureFrame);
+      (
+        window as Window & {
+          __reviewFrameTiming?: typeof state;
+        }
+      ).__reviewFrameTiming = state;
+    });
+    await params.operation();
+    return await params.page.evaluate(async () => {
+      await new Promise<void>((resolveFrame) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolveFrame()));
+      });
+      const state = (
+        window as Window & {
+          __reviewFrameTiming?: {
+            frame: number;
+            intervals: number[];
+            previousTime: number;
+          };
+        }
+      ).__reviewFrameTiming;
+      if (!state) {
+        throw new Error("Frame timing was not initialized.");
+      }
+      cancelAnimationFrame(state.frame);
+      const intervals = [...state.intervals].sort((left, right) => left - right);
+      const p95Index = Math.max(0, Math.ceil(intervals.length * 0.95) - 1);
+      return {
+        frameCount: intervals.length,
+        framesOverBudget: intervals.filter((duration) => duration > 100).length,
+        maxFrameMs: Math.round((intervals.at(-1) ?? 0) * 10) / 10,
+        p95FrameMs: Math.round((intervals[p95Index] ?? 0) * 10) / 10,
+      };
+    });
+  }
+
+  public async attachMetrics(params: {
+    metrics: PerformanceMetric[];
+    testInfo: TestInfo;
+  }): Promise<void> {
+    await params.testInfo.attach("performance-metrics", {
+      body: Buffer.from(`${JSON.stringify(params.metrics, null, 2)}\n`),
+      contentType: "application/json",
+    });
+  }
+
+  private async measure(params: {
+    budgetMs: number;
+    label: string;
+    operation: () => Promise<void>;
+  }): Promise<PerformanceMetric> {
+    const startedAt = performance.now();
+    await params.operation();
+    const durationMs = performance.now() - startedAt;
+    expect(durationMs, `${params.label} exceeded ${params.budgetMs} ms`).toBeLessThan(
+      params.budgetMs,
+    );
+    return {
+      budgetMs: params.budgetMs,
+      durationMs: Math.round(durationMs * 10) / 10,
+      label: params.label,
+    };
+  }
+
+  private async waitForLine(params: { host: Locator; lineNumber: number }): Promise<void> {
+    await expect
+      .poll(
+        async function findRenderedLine() {
+          return await params.host.evaluate((host, lineNumber) => {
+            return Boolean(
+              host.shadowRoot?.querySelector(
+                `[data-column-number="${lineNumber}"][data-line-index]`,
+              ),
+            );
+          }, params.lineNumber);
+        },
+        { timeout: this.params.budgets.initialRenderMs },
+      )
+      .toBe(true);
+  }
+}
 
 const fixtureDirectory = resolve(process.cwd(), "e2e/.generated");
-const ReviewPerformanceDriver = ReviewPerformanceDriverServiceBuilder({
-  config: {
+const ReviewPerformanceDriver = new PerformanceDriver({
+  params: {
     budgets: {
       commentMs: 2_000,
       initialRenderMs: 15_000,
@@ -497,8 +471,8 @@ test.describe("extremely large review performance", function describeLargeReview
   test("keeps a 64-file diff responsive through navigation and sequential comments", async function testLargeDiff({
     page,
   }, testInfo) {
-    const LargeReviewEnvironment = LargeReviewEnvironmentServiceBuilder({
-      config: {
+    const LargeReviewEnvironment = new ReviewEnvironment({
+      params: {
         cliPath: resolve(process.cwd(), "dist/cli.mjs"),
         fixtureDirectory,
         nodeExecutable: process.execPath,
@@ -579,7 +553,7 @@ test.describe("extremely large review performance", function describeLargeReview
         await ReviewPerformanceDriver.addComment({
           label: "add first deep diff comment",
           operation: async function addFirstDiffComment() {
-            await ReviewPerformanceDriver.clickLine({ host: diffHost, lineNumber: 120, page });
+            await ReviewPerformanceDriver.clickLine({ host: diffHost, lineNumber: 120 });
             await expect(commentEditors).toHaveCount(1);
           },
         }),
@@ -605,7 +579,7 @@ test.describe("extremely large review performance", function describeLargeReview
         await ReviewPerformanceDriver.addComment({
           label: "replace an unblurred empty diff comment",
           operation: async function replaceEmptyDiffComment() {
-            await ReviewPerformanceDriver.clickLine({ host: diffHost, lineNumber: 160, page });
+            await ReviewPerformanceDriver.clickLine({ host: diffHost, lineNumber: 160 });
             await expect(commentEditors).toHaveCount(1);
           },
         }),
@@ -638,6 +612,7 @@ test.describe("extremely large review performance", function describeLargeReview
       );
       const firstDraft =
         "First large diff comment remains responsive while every keystroke updates local form state.";
+      let didKeepTypingLocal = false;
       const diffTypingFrameTiming = await ReviewPerformanceDriver.measureFrameTiming({
         page,
         operation: async function typeFirstDiffCommentWithFrameTiming() {
@@ -646,6 +621,9 @@ test.describe("extremely large review performance", function describeLargeReview
               label: "type first diff comment",
               operation: async function typeFirstDiffComment() {
                 await commentEditors.first().pressSequentially(firstDraft);
+                didKeepTypingLocal = await page.evaluate(() =>
+                  Boolean(document.querySelector('[aria-label="Approve this review"]')),
+                );
               },
             }),
           );
@@ -663,9 +641,6 @@ test.describe("extremely large review performance", function describeLargeReview
         60,
       );
       expect(diffTypingFrameTiming.framesOverBudget, diffTypingFrameTimingMessage).toBe(0);
-      const didKeepTypingLocal = await page.evaluate(() =>
-        Boolean(document.querySelector('[aria-label="Approve this review"]')),
-      );
       expect(didKeepTypingLocal).toBe(true);
       await expect(page.getByRole("button", { name: "Send review comments" })).toBeVisible();
       await commentEditors.first().press("Enter");
@@ -679,7 +654,7 @@ test.describe("extremely large review performance", function describeLargeReview
         await ReviewPerformanceDriver.addComment({
           label: "add second diff comment",
           operation: async function addSecondDiffComment() {
-            await ReviewPerformanceDriver.clickLine({ host: diffHost, lineNumber: 260, page });
+            await ReviewPerformanceDriver.clickLine({ host: diffHost, lineNumber: 260 });
             await expect(commentEditors).toHaveCount(2);
           },
         }),
@@ -720,6 +695,20 @@ test.describe("extremely large review performance", function describeLargeReview
         }),
       );
 
+      const collapsedTargetFileId = "file-8";
+      const collapsedTargetFileLink = page.locator(
+        `[data-review-file-link="${collapsedTargetFileId}"]`,
+      );
+      const search = page.getByLabel("Filter changed files");
+      await search.fill("extremely-large-file-008");
+      await expect(collapsedTargetFileLink).toHaveAttribute("data-collapsed", "true");
+      await collapsedTargetFileLink.click();
+      await expect(collapsedTargetFileLink).toHaveAttribute("data-collapsed", "false");
+      await expect(
+        page.locator(`[data-review-file-item="${collapsedTargetFileId}"] diffs-container`),
+      ).toBeVisible();
+      await search.fill("");
+
       const lastFileUrl = new URL(pointer.url);
       lastFileUrl.searchParams.set("file", "src/generated/area-07/extremely-large-file-063.ts");
       await page.goto(lastFileUrl.href, { waitUntil: "domcontentloaded" });
@@ -747,8 +736,8 @@ test.describe("extremely large review performance", function describeLargeReview
   test("keeps a 10,000-line document responsive through code and table comments", async function testLargeDocument({
     page,
   }, testInfo) {
-    const LargeReviewEnvironment = LargeReviewEnvironmentServiceBuilder({
-      config: {
+    const LargeReviewEnvironment = new ReviewEnvironment({
+      params: {
         cliPath: resolve(process.cwd(), "dist/cli.mjs"),
         fixtureDirectory,
         nodeExecutable: process.execPath,

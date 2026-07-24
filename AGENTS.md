@@ -6,26 +6,35 @@
 - Use `lgtm review result` with the exact review path after the human decides or a handoff is missing.
 - Treat `approved`, `changes_requested`, and `canceled` as the only review outcomes.
 - Never use bare `lgtm` as a review command or `LGTM` as an outcome.
-- Build reusable runtime behavior through `src/builder.ts`.
-- Use `build().service`, `singleton`, `component`, or `hook` for reusable behavior.
-- Run executable roots through `build().entrypoint`.
-- Never self-invoke a service at module scope.
-- Do not add application classes, `DomainClass`, or base-class dependency injection.
-- Services receive stable `config` and replaceable `deps`.
-- Inline production `deps` in builder definitions.
-- Avoid named types and constants for one-use dependency bags.
-- Use `defineBuilderDeps` only when inline dependencies need wider replacement types.
-- Service methods accept one `params` object.
-- Export the named production value and generated `Builder` from each shared builder result.
-- Name services `*Service` and singletons `*Singleton`.
+- Treat `ARCHITECTURE.md` as the architectural source of truth.
+- Keep application code under `src/app`, `src/domains`, `src/providers`, or `src/utils`.
+- Keep development-only enforcement under `src/tooling`.
+- Give each business domain a deliberate public API in `src/domains/<domain>/index.ts`.
+- Use domain public APIs across domains and from app composition roots.
+- Keep domain internals within their owning domain and architectural layer.
+- Parse external data at app, repo, or runtime boundaries before domain behavior uses it.
+- Use `defineType` for runtime schemas and parsers in `types`.
+- Use `defineConfig` for runtime configuration values.
+- Use `defineUtil` for shared utility definitions in `utils`.
+- Use plain TypeScript for type-only declarations.
+- Build reusable behavior through `src/define.ts`.
+- Use `defineRepo` for persistence, serialization, Git, SSH, and external data acquisition.
+- Use `defineService` for stateless use cases, transformations, and business rules.
+- Use `defineRuntime` for stateful orchestration, servers, routes, timers, and caches.
+- Use `defineProvider` for domain-independent platform boundaries.
+- Use `defineUIComponent` and `defineUIHook` for React components and hooks.
+- Use `defineApp` only at executable composition roots.
+- Give definitions stable `params` and replaceable `deps`.
+- Keep production dependencies explicit in each definition.
+- Instantiate definitions in composition roots or as intentional stateless defaults.
+- Make public methods accept one `params` object.
+- Name repository classes `*Repo` or `*Repository`.
+- Name services `*Service`, runtime classes for their owned process, and providers `*Provider`.
 - Name components `*Component` or `*Route`; name hooks `use*`.
-- Use `build().hook` for lifecycle behavior.
 - Provide React primitives and platform services to hooks through `deps`.
-- Use named functions for callbacks, hook implementations, components, and private builder functions.
+- Use named functions for callbacks, components, and private behavior when practical.
 - Make each top-level UI route a smart `XYZRoute` component.
-- Let routes own queries, mutations, persistence, navigation, global effects, and view mapping.
-- Colocate an `XYZTemplateComponent` with each smart route.
-- Pass render data and callbacks to templates through props.
+- Let routes coordinate queries, mutations, persistence, navigation, effects, and view mapping.
 - Split route layout into focused header, sidebar, content, and footer components.
 - Share UI concepts used by both diff and document views.
 - Prefer TypeScript inference.
@@ -33,12 +42,13 @@
 - Name types only for reused contracts or meaningful domain concepts.
 - Avoid aliases that only rename inferred primitives, callbacks, refs, timers, or dependency bags.
 - Name compound conditions before `if` statements with descriptive boolean constants.
-- Keep source under `modules/`, `entrypoints/`, or `web/`; `src/builder.ts` is the root exception.
+- Keep production files under 400 meaningful lines and tests under 600 meaningful lines.
+- Keep functions and methods under 80 meaningful lines.
 - Give behavior folders a same-named source file and colocated test.
-- Keep grouping folders limited to child folders.
+- Keep grouping folders limited to child folders and public `index.ts` files.
 - Preserve behavior when reorganizing capabilities.
 - Use Vite+ as the source execution pipeline.
-- Run `vp check`, then `vp run package`, before LGTM.
+- Run `vp check`, `vp test --run`, and `vp run build:package` before lgtm review.
 - Run generated `dist/cli.mjs` with Node; never execute source TypeScript with Node.
 - Start releases from a clean worktree.
 - Run `bun run release:patch`, `release:minor`, `release:major`, or `release:beta` to release.

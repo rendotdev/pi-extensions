@@ -1,8 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import process from "node:process";
-import { build } from "../src/builder.ts";
-import type { DiffReviewFileInput } from "../src/modules/review/review/review.ts";
+import { defineApp } from "../src/define.ts";
+import type { DiffReviewFileInput } from "../src/domains/review/index.ts";
 
 export type LargeReviewFixtureManifest = {
   diff: {
@@ -18,8 +18,8 @@ export type LargeReviewFixtureManifest = {
   };
 };
 
-await build().entrypoint({
-  config: {
+await defineApp({
+  params: {
     codeLinesPerBlock: 32,
     diffFileCount: 64,
     diffLinesPerFile: 500,
@@ -27,47 +27,49 @@ await build().entrypoint({
     outputDirectory: resolve(process.cwd(), "e2e/.generated"),
   },
   deps: { mkdir, writeFile },
-  run({ config, deps }) {
+  async run() {
+    const entrypointParams = this.params;
+    const entrypointDeps = this.deps;
     async function generate(): Promise<LargeReviewFixtureManifest> {
-      await deps.mkdir(config.outputDirectory, { recursive: true });
-      const diffPath = resolve(config.outputDirectory, "large-diff.json");
-      const documentPath = resolve(config.outputDirectory, "large-document.md");
-      const manifestPath = resolve(config.outputDirectory, "manifest.json");
+      await entrypointDeps.mkdir(entrypointParams.outputDirectory, { recursive: true });
+      const diffPath = resolve(entrypointParams.outputDirectory, "large-diff.json");
+      const documentPath = resolve(entrypointParams.outputDirectory, "large-document.md");
+      const manifestPath = resolve(entrypointParams.outputDirectory, "manifest.json");
       const files = createDiffFiles();
       const markdown = createDocument();
       const manifest: LargeReviewFixtureManifest = {
         diff: {
           fileCount: files.length,
-          linesPerFile: config.diffLinesPerFile,
+          linesPerFile: entrypointParams.diffLinesPerFile,
           path: diffPath,
         },
         document: {
-          codeBlockCount: Math.floor(config.documentSectionCount / 4),
+          codeBlockCount: Math.floor(entrypointParams.documentSectionCount / 4),
           path: documentPath,
-          sectionCount: config.documentSectionCount,
+          sectionCount: entrypointParams.documentSectionCount,
           sourceLineCount: markdown.split("\n").length,
         },
       };
       await Promise.all([
-        deps.writeFile(
+        entrypointDeps.writeFile(
           diffPath,
           `${JSON.stringify({ name: "Extremely large diff", files })}\n`,
           "utf8",
         ),
-        deps.writeFile(documentPath, markdown, "utf8"),
-        deps.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8"),
+        entrypointDeps.writeFile(documentPath, markdown, "utf8"),
+        entrypointDeps.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8"),
       ]);
       process.stdout.write(
-        `Generated ${manifest.diff.fileCount} diff files and ${manifest.document.sourceLineCount} document lines in ${config.outputDirectory}\n`,
+        `Generated ${manifest.diff.fileCount} diff files and ${manifest.document.sourceLineCount} document lines in ${entrypointParams.outputDirectory}\n`,
       );
       return manifest;
     }
 
     function createDiffFiles(): DiffReviewFileInput[] {
-      return Array.from({ length: config.diffFileCount }, (_, fileIndex) => {
+      return Array.from({ length: entrypointParams.diffFileCount }, (_, fileIndex) => {
         const oldLines: string[] = [];
         const newLines: string[] = [];
-        for (let lineIndex = 1; lineIndex <= config.diffLinesPerFile; lineIndex += 1) {
+        for (let lineIndex = 1; lineIndex <= entrypointParams.diffLinesPerFile; lineIndex += 1) {
           const identifier = `${String(fileIndex).padStart(3, "0")}_${String(lineIndex).padStart(4, "0")}`;
           const stableLine = `export const fixture_${identifier} = createFixtureValue({ file: ${fileIndex}, line: ${lineIndex}, payload: "deterministic-large-review-${identifier}" });`;
           oldLines.push(stableLine);
@@ -98,7 +100,11 @@ await build().entrypoint({
         "This generated document deliberately combines long prose, tables, lists, and code blocks so the complete document review surface is exercised under sustained load.",
         "",
       ];
-      for (let sectionIndex = 1; sectionIndex <= config.documentSectionCount; sectionIndex += 1) {
+      for (
+        let sectionIndex = 1;
+        sectionIndex <= entrypointParams.documentSectionCount;
+        sectionIndex += 1
+      ) {
         const sectionLabel = String(sectionIndex).padStart(4, "0");
         sections.push(`## Performance section ${sectionLabel}`, "");
         for (let paragraphIndex = 1; paragraphIndex <= 4; paragraphIndex += 1) {
@@ -120,7 +126,7 @@ await build().entrypoint({
         sections.push("- Comment drafts remain stable while other blocks update.", "");
         if (sectionIndex % 4 === 0) {
           sections.push("```ts");
-          for (let codeLine = 1; codeLine <= config.codeLinesPerBlock; codeLine += 1) {
+          for (let codeLine = 1; codeLine <= entrypointParams.codeLinesPerBlock; codeLine += 1) {
             sections.push(
               `const section_${sectionLabel}_line_${String(codeLine).padStart(2, "0")} = runLargeDocumentOperation({ section: ${sectionIndex}, line: ${codeLine}, label: "large-document-${sectionLabel}-${String(codeLine).padStart(2, "0")}" });`,
             );
@@ -130,6 +136,6 @@ await build().entrypoint({
       }
       return `${sections.join("\n")}\n`;
     }
-    return generate();
+    return await generate();
   },
 });

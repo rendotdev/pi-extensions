@@ -33,7 +33,9 @@ Otherwise, use the bundled MCP tools when they are available:
 - `open_document_review`
 - `finish_review`
 
-The MCP open tool stays pending until the human decides, then returns the result directly and stops the local server. Choose the tool that matches the source. Open it only after the work is ready and proportionately validated. Do not open another review for the same work while one is active.
+The MCP open tool returns a durable review URL and `reviewPath` immediately. Choose the tool that matches the source. Open it only after the work is ready and proportionately validated. Give the human the URL, then stop the current turn while they review. Do not open another review for the same work while one is active.
+
+After the human returns to the conversation, call `finish_review` with the exact `reviewPath`. An open result leaves the browser server running and restarts it when its saved server is unreachable. Give the human the returned URL when it changed. A terminal result returns `approved`, `changes_requested`, or `canceled` and stops only that review server. MCP request cancellation, host timeouts, and plugin process exit do not own the durable review server.
 
 For a Git repository on another SSH machine, use the available Git review tool with `remote`, `remoteCwd`, and optional `sinceLast`. For a remote linked worktree, use the available worktree review tool with `remote` and an absolute remote path. The MCP tool calls that path `path`; the Pi tool calls it `worktree`. SSH runs on the local agent machine through its existing OpenSSH configuration; the remote machine needs Git and standard POSIX shell utilities, not lgtm.
 

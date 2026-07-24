@@ -1,22 +1,24 @@
 import { resolve } from "node:path";
 import process from "node:process";
-import { build } from "../src/builder.ts";
-import { DemoReviewSingleton, type DemoReviewKind } from "../src/modules/review/demo/demo.ts";
-import { DemoImageService } from "../src/modules/review/demo-image/demo-image.ts";
+import { defineApp } from "../src/define.ts";
+import { DemoReview, type DemoReviewKind } from "../src/domains/review/index.ts";
+import { DemoImage } from "../src/domains/review/runtime/index.ts";
 
-await build().entrypoint({
-  config: { outputDirectory: resolve(process.cwd(), "assets") },
-  deps: { render: DemoImageService.render },
-  async run({ config, deps }): Promise<void> {
+const demoImage = new DemoImage();
+
+await defineApp({
+  params: { outputDirectory: resolve(process.cwd(), "assets") },
+  deps: { render: demoImage.render.bind(demoImage) },
+  async run(): Promise<void> {
     const kinds: DemoReviewKind[] = ["diff", "document"];
     const themes = ["light", "dark"] as const;
     for (const theme of themes) {
       for (const kind of kinds) {
         const suffix = theme === "dark" ? "-dark" : "";
-        const output = resolve(config.outputDirectory, `lgtm-demo-${kind}${suffix}.jpg`);
-        await deps.render({
-          comments: DemoReviewSingleton.createComments({ kind }),
-          input: DemoReviewSingleton.create({ kind }),
+        const output = resolve(this.params.outputDirectory, `lgtm-demo-${kind}${suffix}.jpg`);
+        await this.deps.render({
+          comments: DemoReview.createComments({ kind }),
+          input: DemoReview.create({ kind }),
           output,
           theme,
         });
