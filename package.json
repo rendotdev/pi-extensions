@@ -1,6 +1,6 @@
 {
   "name": "@rendotdev/lgtm",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "private": false,
   "description": "Human approval for agent work, with code diff and Markdown review.",
   "keywords": [

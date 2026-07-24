@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "lgtm",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Human approval for agent work, with code diff and Markdown review.",
   "author": {
     "name": "René-Pier Deshaies-Gélinas",
